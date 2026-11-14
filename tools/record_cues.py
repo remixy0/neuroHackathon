@@ -27,13 +27,8 @@ HERE = Path(__file__).parent
 # (etykieta, polecenie, etykieta drugiego sygnalu albo None = "wroc do pozycji wyjsciowej")
 ACTIONS = [
     ("blink", "mrugnij", None),
-    ("eyes_close", "zamknij oczy, na drugi sygnał otwórz", "eyes_open"),
     ("look_left", "spójrz w lewo", None),
     ("look_right", "spójrz w prawo", None),
-    ("look_up", "spójrz w górę", None),
-    ("look_down", "spójrz w dół", None),
-    ("mouth_left", "usta w lewo", None),
-    ("mouth_right", "usta w prawo", None),
     ("jaw", "otwórz szczękę", None),
     ("head_left", "obróć głowę w lewo", None),
     ("head_right", "obróć głowę w prawo", None),
@@ -106,9 +101,6 @@ def main():
     ap.add_argument("--reps", type=int, default=5, help="ile razy kazda czynnosc (domyslnie 5; ok. 1,7 min na runde)")
     ap.add_argument("--rest", type=float, default=30, help="sekundy spoczynku na poczatku")
     ap.add_argument("--hold", type=float, default=2.5, help="sekundy trzymania pozycji do drugiego sygnalu")
-    ap.add_argument("--strobe", default="4,6,8,15",
-                    help="czestotliwosci stroboskopu w Hz, np. 7,9,11,13; pusty napis = bez stroboskopu")
-    ap.add_argument("--strobe-s", type=float, default=15, help="sekundy patrzenia na stroboskop")
     ap.add_argument("--only", help="tylko wybrane czynnosci, np. mouth_left,mouth_right,jaw")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--no-voice", action="store_true", help="nie czytaj polecen na glos")
@@ -131,7 +123,6 @@ def main():
         if unknown:
             sys.exit(f"Nieznane czynnosci: {sorted(unknown)}. Dostepne: {[x[0] for x in ACTIONS]}")
         actions = [x for x in ACTIONS if x[0] in want]
-    strobe = [float(x) for x in a.strobe.split(",") if x.strip()]
 
     out = Path(a.out) if a.out else HERE / "labels" / f"{a.person}-{datetime.now():%Y%m%d-%H%M%S}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +138,7 @@ def main():
 
     n_trials = len(actions) * a.reps
     screen(f"Sesja: {a.person}", f"Zegar: {clock.source}", f"Znaczniki: {out}", "",
-           f"{n_trials} prob w {a.reps} rundach, potem stroboskop: {strobe or 'brak'}", "",
+           f"{n_trials} prob w {a.reps} rundach", "",
            "Zasada: uslyszysz polecenie. Na PIERWSZY sygnal wykonaj ruch i trzymaj.",
            "Na DRUGI sygnal wroc do pozycji wyjsciowej (patrz prosto, twarz luzna).",
            "Miedzy probami siedz nieruchomo.", "",
@@ -196,17 +187,6 @@ def main():
                 pause("Enter = nastepna runda...")
                 wait(2.0)
 
-        for f in strobe:
-            screen(f"STROBOSKOP {f:g} Hz", "", "Wlacz stroboskop i popros o patrzenie w swiatlo.")
-            pause(f"Enter, gdy stroboskop {f:g} Hz juz miga...")
-            t = clock.now()
-            screen(f"STROBOSKOP {f:g} Hz", "", f"patrz w swiatlo przez {a.strobe_s:.0f} s")
-            wait(a.strobe_s)
-            doc["intervals"].append([t, clock.now(), f"strobe_{f:g}hz"])
-            save()
-            audio.beep(second=True)
-            screen(f"Wylacz stroboskop {f:g} Hz.", "Przerwa 10 s.")
-            wait(10)
     except KeyboardInterrupt:
         print("\n      Przerwano - dotychczasowe znaczniki sa zapisane.")
 

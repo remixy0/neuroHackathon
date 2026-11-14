@@ -13,11 +13,9 @@ from scipy import signal
 EEG = ["O1", "O2", "Fp2", "Fp1"]
 GYRO = ["Gyro_x", "Gyro_y", "Gyro_z"]
 ACC = ["Accel_x", "Accel_y", "Accel_z"]
-# czestotliwosci stroboskopu, ktorych odpowiedzi szukamy (istniejace nagrania: 4, 6, 8, 15)
-STROBE_FREQS = [4.0, 6.0, 7.0, 8.0, 9.0, 11.0, 13.0, 15.0]
 
 WIN_S = 1.5       # okno na zdarzenia (ruchy)
-SPEC_S = 4.0      # okno na widmo (stroboskop, alfa)
+SPEC_S = 4.0      # okno na widmo (alfa, theta)
 HOP_S = 0.25      # co ile liczymy cechy
 BASELINE_S = 60.0  # dlugosc biegnacej mediany (normalizacja do osoby/zalozenia czepka)
 
@@ -54,10 +52,6 @@ def feature_names() -> list[str]:
     n += [f"emg_{c}_logrms" for c in EEG]
     n += ["emg_fp_lr", "emg_o_lr", "emg_fp_vs_o", "emg_fp_burst", "emg_fp1_peakpos", "emg_fp2_peakpos"]
     n += ["alpha_rel", "theta_rel", "alpha_lr"]
-    for f in STROBE_FREQS:
-        n += [f"ssvep_{f:g}_f1", f"ssvep_{f:g}_f2"]
-    n += ["ssvep_best_margin"]
-    n += [f"cca_{f:g}" for f in STROBE_FREQS] + ["cca_best_margin"]
     return n
 
 
@@ -66,6 +60,17 @@ _BASELINED = {f"emg_{c}_logrms" for c in EEG} | {f"eog_{s}_logptp" for s in ("fp
     "alpha_rel", "theta_rel", "acc_std"}
 # cechy amplitudowe EOG skalowane typowa amplituda tla danej osoby
 _EOG_SCALED = {f"eog_{s}_{k}" for s in ("fp1", "fp2", "vert", "horiz") for k in ("peak", "step", "first")}
+
+
+def normalize(raw: np.ndarray, med: np.ndarray, names: list[str]) -> np.ndarray:
+    """Cechy wzgledem tla osoby: od poziomow odejmujemy mediane tla, amplitudy EOG dzielimy typowa amplituda.
+    raw: jeden wektor albo macierz (okna x cechy); med: mediana surowych cech z tla."""
+    f = np.array(raw, dtype=float, copy=True)
+    ix_base = [i for i, n in enumerate(names) if n in _BASELINED]
+    ix_eog = [i for i, n in enumerate(names) if n in _EOG_SCALED]
+    f[..., ix_base] -= med[ix_base]
+    f[..., ix_eog] /= max(float(np.exp(med[names.index("eog_vert_logptp")])), 1.0)
+    return f
 
 
 class FeatureStream:
@@ -113,11 +118,7 @@ class FeatureStream:
         return out
 
     def _normalize(self, raw: np.ndarray) -> np.ndarray:
-        med = np.median(np.asarray(self.history), axis=0)
-        f = raw.copy()
-        f[self._ix_base] -= med[self._ix_base]
-        f[self._ix_eog] /= max(np.exp(med[self._ix_scale]), 1.0)
-        return f
+        return normalize(raw, np.median(np.asarray(self.history), axis=0), self.names)
 
     def _features(self) -> np.ndarray:
         fs = self.fs
@@ -156,7 +157,7 @@ class FeatureStream:
         o = self.buf["eeg"][:2]
         n = o.shape[1]
         if n < 2 * fs:
-            f += [0.0] * (3 + 2 * len(STROBE_FREQS) + 1 + len(STROBE_FREQS) + 1)
+            f += [0.0] * 3
         else:
             o = o - o.mean(axis=1, keepdims=True)
             P = np.abs(np.fft.rfft(o * np.hanning(n), n=int(8 * fs), axis=1)) ** 2
@@ -169,29 +170,6 @@ class FeatureStream:
             tot = band(Ps, 2, 30) + 1e-12
             f += [float(np.log(band(Ps, 8, 13) / tot)), float(np.log(band(Ps, 4, 7) / tot)),
                   float(np.log((band(P[0], 8, 13) + 1e-12) / (band(P[1], 8, 13) + 1e-12)))]
-            snr = []
-            for f0 in STROBE_FREQS:
-                pair = []
-                for ft in (f0, 2 * f0):
-                    pk = Ps[np.abs(fr - ft) <= 0.3].max()
-                    bg = np.median(Ps[(np.abs(fr - ft) > 0.6) & (np.abs(fr - ft) < 3.0)])
-                    pair.append(float(np.log(pk / (bg + 1e-12))))
-                f += pair
-                snr.append(max(pair))
-            ss = sorted(snr)
-            f.append(ss[-1] - ss[-2])
-            # CCA: korelacja 4 kanalow EEG z sinusami o czestotliwosci stroboskopu (+ 2. harmoniczna)
-            x = self.buf["eeg"] - self.buf["eeg"].mean(axis=1, keepdims=True)
-            qx = np.linalg.qr(x.T)[0]
-            tt = np.arange(n) / fs
-            cc = []
-            for f0 in STROBE_FREQS:
-                ref = np.stack([fn(2 * np.pi * h * f0 * tt) for h in (1, 2) for fn in (np.sin, np.cos)], axis=1)
-                qy = np.linalg.qr(ref - ref.mean(axis=0))[0]
-                cc.append(float(np.linalg.svd(qx.T @ qy, compute_uv=False)[0]))
-            f += cc
-            cs = sorted(cc)
-            f.append(cs[-1] - cs[-2])
         return np.asarray(f, dtype=float)
 
 

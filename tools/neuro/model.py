@@ -2,24 +2,35 @@
 from __future__ import annotations
 
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import ExtraTreesClassifier
 
 from .dataset import Dataset
 
 LABELS_PL = {
-    "rest": "spoczynek", "blink": "mrugniecie", "eyes_close": "zamkniecie oczu", "eyes_open": "otwarcie oczu",
-    "look_left": "spojrzenie w lewo", "look_right": "spojrzenie w prawo", "look_up": "spojrzenie w gore",
-    "look_down": "spojrzenie w dol", "mouth_left": "usta w lewo", "mouth_right": "usta w prawo",
+    "rest": "spoczynek", "blink": "mrugniecie",
+    "look_left": "spojrzenie w lewo", "look_right": "spojrzenie w prawo",
+    "mouth_left": "usta w lewo", "mouth_right": "usta w prawo",
     "jaw": "szczeka (otwarcie)", "head_left": "glowa w lewo", "head_right": "glowa w prawo",
     "head_up": "glowa w gore", "head_down": "glowa w dol", "frown": "zmarszczenie czola",
-    "strobe_4hz": "stroboskop 4 Hz", "strobe_6hz": "stroboskop 6 Hz", "strobe_8hz": "stroboskop 8 Hz",
-    "strobe_15hz": "stroboskop 15 Hz",
 }
 
+# zmien przy kazdej zmianie klas albo klasyfikatora - aplikacja przetrenuje wtedy model sama przy starcie
+MODEL_VERSION = 4  # 3: proby ze sledzenia kropki poza modelem gestow, 4: bez spojrzen gora/dol
 
-def new_model(seed: int = 0) -> RandomForestClassifier:
-    return RandomForestClassifier(n_estimators=400, min_samples_leaf=1, class_weight="balanced",
-                                  random_state=seed, n_jobs=-1)
+
+def new_model(seed: int = 0) -> ExtraTreesClassifier:
+    # ExtraTrees zamiast lasu losowego: na nowej osobie ok. 3 pkt proc. lepiej, 2x szybszy trening
+    return ExtraTreesClassifier(n_estimators=300, min_samples_leaf=2, class_weight="balanced",
+                                random_state=seed, n_jobs=-1)
+
+
+def bundle(model, d: Dataset) -> dict:
+    """Zawartosc pliku models/model.joblib."""
+    return {"model": model, "features": d.names, "people": sorted(set(d.person)), "version": MODEL_VERSION}
+
+
+def is_current(b: dict, features: list[str]) -> bool:
+    return b.get("version") == MODEL_VERSION and b.get("features") == features
 
 
 def concat(ds: list[Dataset]) -> Dataset:
@@ -67,9 +78,7 @@ def family(label: str) -> str:
         return "eyes"
     if label.startswith(("mouth", "jaw", "frown")):
         return "face"
-    if label.startswith("strobe"):
-        return "strobe"
     return "rest"
 
 
-FAMILY_PL = {"head": "ruch glowy", "eyes": "oczy", "face": "miesnie twarzy", "strobe": "stroboskop", "rest": "spoczynek"}
+FAMILY_PL = {"head": "ruch glowy", "eyes": "oczy", "face": "miesnie twarzy", "rest": "spoczynek"}
