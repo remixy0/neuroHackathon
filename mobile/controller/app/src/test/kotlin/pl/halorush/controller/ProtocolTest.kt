@@ -13,6 +13,21 @@ fun fixture() = SignalFrame(
 )
 
 class ProtocolTest {
+    @Test fun `manual identifies player button and ordered unique event without sensor data`() {
+        val hello = Json.parseToJsonElement(Protocol.manualHello("pad", 2)).jsonObject
+        assertEquals("manual", hello.getValue("mode").jsonPrimitive.content)
+        assertFalse(hello.containsKey("stream"))
+        for ((seq, button) in Protocol.MANUAL_BUTTONS.withIndex()) {
+            val event = Json.parseToJsonElement(Protocol.manual("pad", seq.toLong(), 2, button)).jsonObject
+            assertEquals("manual", event.getValue("type").jsonPrimitive.content)
+            assertEquals(2, event.getValue("player").jsonPrimitive.int)
+            assertEquals("pad:$seq", event.getValue("id").jsonPrimitive.content)
+            assertEquals(button, event.getValue("button").jsonPrimitive.content)
+            assertEquals("press", event.getValue("action").jsonPrimitive.content)
+        }
+        assertThrows(IllegalArgumentException::class.java) { Protocol.manual("pad", 0, 1, "unknown") }
+        assertThrows(IllegalArgumentException::class.java) { Protocol.manualHello("pad", 3) }
+    }
     @Test fun `preserves row order units gaps and exact long counters`() {
         val f = fixture()
         val hello = Json.parseToJsonElement(Protocol.hello("s", 2, "d", "HALO", "HALO_V3", f)).jsonObject

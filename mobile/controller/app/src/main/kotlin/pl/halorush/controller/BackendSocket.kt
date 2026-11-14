@@ -18,6 +18,7 @@ class BackendSocket(
     private val player: Int,
     private val onInput: (String) -> Unit,
     private val clockNs: () -> Long = System::nanoTime,
+    private val mode: String = "eeg",
 ) : WebSocketListener() {
     private val opened = CompletableDeferred<Unit>()
     private val ready = CompletableDeferred<Unit>()
@@ -47,13 +48,25 @@ class BackendSocket(
 
     @Synchronized
     fun send(frame: SignalFrame, skipped: Long, missed: Long) {
+        check(mode == "eeg")
+        sendTracked { seq -> Protocol.samples(sessionId, seq, frame, skipped, missed) }
+    }
+
+    @Synchronized
+    fun sendManual(button: String) {
+        check(mode == "manual")
+        require(button in Protocol.MANUAL_BUTTONS)
+        sendTracked { seq -> Protocol.manual(sessionId, seq, player, button) }
+    }
+
+    private fun sendTracked(encode: (Long) -> String) {
         if (!ready.isCompleted || failed.isCompleted) throw IOException("Backend nie jest gotowy")
         val ws = socket ?: throw IOException("Brak WebSocket")
         checkHealth()
         if (ws.queueSize() > 64 * 1024) throw IOException("Backend odbiera zbyt wolno")
         val seq = nextSeq++
         pending.addLast(seq to clockNs())
-        if (!ws.send(Protocol.samples(sessionId, seq, frame, skipped, missed))) {
+        if (!ws.send(encode(seq))) {
             throw IOException("Przerwano wysyłanie")
         }
     }
@@ -62,7 +75,7 @@ class BackendSocket(
     fun checkHealth() {
         val oldest = pending.peekFirst()
         if (oldest != null && clockNs() - oldest.second > TimeUnit.SECONDS.toNanos(2)) {
-            throw IOException("Brak potwierdzeń próbek od backendu przez 2 s")
+            throw IOException("Brak potwierdzeń danych od serwera przez 2 s")
         }
     }
 
@@ -92,6 +105,8 @@ class BackendSocket(
                 "ready" -> {
                     if (!helloSent || ready.isCompleted || msg["player"]?.jsonPrimitive?.intOrNull != player)
                         throw ProtocolException("Nieprawidłowe potwierdzenie ready")
+                    if ((msg["mode"]?.jsonPrimitive?.content ?: "eeg") != mode)
+                        throw ProtocolException("Serwer nie potwierdził wybranego trybu kontrolera")
                     ready.complete(Unit)
                 }
                 "ack" -> {
@@ -133,4 +148,6 @@ class BackendSocket(
     private fun fail(error: Throwable) {
         failed.complete(error); opened.completeExceptionally(error); ready.completeExceptionally(error)
     }
+
+    fun abort(error: Throwable) { fail(error); socket?.cancel() }
 }

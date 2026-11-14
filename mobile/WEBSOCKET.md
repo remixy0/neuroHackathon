@@ -2,7 +2,8 @@
 
 Propozycja kontraktu zaimplementowana w `controller/`. Istniejący backend musi
 obsługiwać poniższe wiadomości; nie zakładamy, że już obsługuje ten format.
-Nie dodajemy nowego backendu. Protokół do gry pozostaje w `../game/WEBSOCKET.md`.
+Odbiornik do testów obu trybów jest w `test-server/`. Protokół do gry pozostaje
+w `../game/WEBSOCKET.md`.
 
 ```text
 HALO ──BLE── Android ──WebSocket /ws/controller── istniejący backend + model
@@ -18,15 +19,21 @@ HALO ──BLE── Android ──WebSocket /ws/controller── istniejący ba
 - Telefon wysyła opcjonalny nagłówek `Authorization: Bearer <token>` przy upgrade.
 - `wss://` do połączeń szyfrowanych; `ws://` jest dostępne dla sieci lokalnej.
 - Każda wiadomość w obu kierunkach zawiera `type`, `version: 1`, `session_id` (UUID).
-- Jeden socket telefonu odpowiada jednej opasce i jednemu graczowi, `1` lub `2`.
-- Sekwencja: otwarcie → `hello` → `ready` → `samples` / `ack` → `stop` / zamknięcie.
+- Jeden socket telefonu odpowiada jednemu graczowi, `1` lub `2`, i jednemu trybowi:
+  `eeg` (HALO) albo `manual` (przyciski na ekranie, bez opaski).
+- Sekwencja: otwarcie → `hello` → `ready` → `samples` lub `manual` / `ack` → `stop` / zamknięcie.
 - Backend ma 5 s na `ready`. Próbek nie wolno wysyłać przed `ready`.
 - Backend rezerwuje gracza atomowo. Drugi telefon żądający zajętego gracza otrzymuje
   `error` i zamknięcie. Nie wolno bezwarunkowo nadpisywać przypisania istniejącego gracza.
 - Przy zamykaniu starego socketu backend zwalnia wyłącznie sesję będącą jego właścicielem,
   aby opóźnione zamknięcie nie usunęło nowego przypisania po reconnect.
 
-## 1. Telefon → backend: hello
+Rozszerzenie `manual` zachowuje `version: 1` i dotychczasowy format EEG. Brak
+`mode` w `hello` oznacza `eeg`; jawne `mode: "eeg"` również jest poprawne.
+Backend obsługujący tylko EEG powinien odrzucić żądanie `mode: "manual"`.
+Opis trybu ręcznego jest w sekcji 7 poniżej.
+
+## 1. Telefon → backend: hello (EEG)
 
 ```json
 {
@@ -201,7 +208,7 @@ transmisję. Dodatkowe pola znanych wiadomości są ignorowane. Backend wysyła 
 telefonu małe wiadomości (maks. 16 384 znaków).
 
 Przy awarii sieci ponowienia następują po 1, 2, 4, 8, potem co 10 s. Każde
-ponowienie ma nowy UUID, nowe `hello`, nowe `seq=0` i świeży strumień HALO.
+ponowienie ma nowy UUID, nowe `hello`, nowe `seq=0` i (w trybie EEG) świeży strumień HALO.
 Pięć sekund wysłanych próbek resetuje opóźnienie ponawiania. Stan modelu i
 detektora gestów backendu nie przechodzi pomiędzy sesjami. Brak odtwarzania
 historii. Błędy 401/403/404 podczas upgrade i close 1002/1003/1008 są terminalne.
@@ -211,6 +218,82 @@ robi to biblioteka WebSocket). Dodatkowo backend powinien wygaszać sesję po
 np. 3 s bez `samples` po fazie `ready` i zwalniać ją przy każdym disconnect.
 `stop` może nie dotrzeć po utracie sieci lub zamknięciu procesu. Telefon kończy
 sesję BLE, jeśli przez 8 s nie otrzyma pakietu, i wymaga ponownego wyboru HALO.
+
+## 7. Kontroler ręczny: manual
+
+Ten sam endpoint, uwierzytelnianie i rezerwacja gracza. Telefon nie łączy się
+z HALO, nie skanuje Bluetooth i nie przesyła danych czujników. Jeden gracz może
+używać HALO, a drugi pada. Jedna sesja nie miesza obu trybów.
+
+Telefon wysyła:
+
+```json
+{"type":"hello","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","role":"controller","mode":"manual","player":1}
+```
+
+Nie ma pól `device` ani `stream`. Backend potwierdza **jawnie** tryb ręczny:
+
+```json
+{"type":"ready","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","mode":"manual","player":1}
+```
+
+Brak `mode: "manual"` w odpowiedzi jest błędem, więc starszy backend nie włączy
+przez przypadek nieobsługiwanego pada. Po `ready` każde stuknięcie wysyła:
+
+```json
+{
+  "type": "manual",
+  "version": 1,
+  "session_id": "a34995a4-5a20-432a-b821-2d080fbeab91",
+  "seq": 0,
+  "id": "a34995a4-5a20-432a-b821-2d080fbeab91:0",
+  "player": 1,
+  "button": "left",
+  "action": "press"
+}
+```
+
+| Pole | Reguła |
+| --- | --- |
+| `player` | Liczba 1 lub 2, identyczna jak w zaakceptowanym `hello`. |
+| `button` | `up`, `down`, `left`, `right`, `a`, `b`, `x`, `select`, `start`. Małe litery. |
+| `action` | Zawsze `press`: pojedyncza aktywacja przycisku (stuknięcie). |
+| `seq` | Numer zdarzenia od 0, rośnie dokładnie o 1 w ramach sesji. |
+| `id` | Dokładnie `<session_id>:<seq>`, np. UUID z sufiksem `:0`. |
+
+Nie ma powtarzania po przytrzymaniu, stanów `down`/`up` przycisku ani zdarzenia
+puszczenia. Wartości `button: "up"` i `button: "down"` oznaczają kierunki krzyżaka.
+Przyciski SELECT/START są zwykłymi zdarzeniami do backendu; START nie otwiera
+sesji, a SELECT jej nie kończy. Ich znaczenie w grze ustala właściwy backend.
+Obecny odbiornik testowy wyłącznie wypisuje zdarzenia, nie mapuje ich na ruchy.
+
+Potwierdzenie korzysta z istniejącego `ack`:
+
+```json
+{"type":"ack","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","seq":0}
+```
+
+ACK potwierdza odbiór, nie wykonanie akcji w grze. Backend sprawdza kolejność,
+identyfikator, tryb, przycisk i gracza przed obsługą. Duplikat / pominięty numer
+jest odrzucany i nie może wykonać kolejnej akcji. Odbiornik testowy odpowiada
+`error` i zamyka niepoprawną sesję. Nie wolno przesłać `manual` w sesji `eeg`
+ani `samples` w sesji `manual`.
+
+Telefon czeka na ACK do 2 s, tak jak dla EEG. Przy problemie wraca na ekran
+łączenia i blokuje pad. Po odzyskaniu połączenia tworzy nowy UUID, `seq=0`
+i puste liczniki. Niewysłane / niepotwierdzone przyciski nie są odtwarzane.
+Zmiana zakładki gracza zamyka starą sesję i rejestruje nową; nie zmienia pola
+`player` wewnątrz już zaakceptowanej sesji. Zajęty gracz daje `player_busy`.
+
+**Bezczynność:** brak naciśnięć jest normalny. Telefon wysyła transportowy
+WebSocket ping co 5 s, a serwer odpowiada pong. Odbiornik testowy odświeża
+limit 10 s sesji manual po takim ping; po utracie transportu zwalnia gracza.
+Nie są to wiadomości JSON ani zdarzenia `manual`. Nie wymagaj ciągłych naciśnięć
+do utrzymania sesji. EEG nadal ma limit ciszy próbek niezależny od pingów.
+
+Opuszczenie aplikacji, zmiana trybu i zakończenie kontrolera wysyłają ten sam
+best-effort `stop` i zamykają połączenie. Tokeny oraz reguły błędów i ponawiania
+pozostają jak w sekcji 6.
 
 ## Źródło formatu SDK
 

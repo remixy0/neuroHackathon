@@ -10,6 +10,54 @@ import org.junit.Test
 import java.io.IOException
 
 class BackendSocketTest {
+    @Test fun `manual sends buttons with cumulative ack and requires explicit mode confirmation`() = runBlocking<Unit> {
+        val server = MockWebServer()
+        val http = OkHttpClient()
+        val confirmed = CompletableDeferred<Unit>()
+        val packets = mutableListOf<JsonObject>()
+        var now = 0L
+        val backend = BackendSocket(http, "test", 1, { confirmed.complete(Unit) }, { now }, mode = "manual")
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(ws: WebSocket, text: String) {
+                val data = Json.parseToJsonElement(text).jsonObject
+                when (data["type"]?.jsonPrimitive?.content) {
+                    "hello" -> ws.send(message("ready", ",\"player\":1,\"mode\":\"manual\""))
+                    "manual" -> {
+                        packets.add(data)
+                        ws.send(message("ack", ",\"seq\":${data.getValue("seq")}"))
+                        if (packets.size == Protocol.MANUAL_BUTTONS.size)
+                            ws.send(message("input", ",\"player\":1,\"direction\":\"left\""))
+                    }
+                }
+            }
+        }))
+        try {
+            backend.open(server.url("/").toString().replaceFirst("http", "ws"), "")
+            assertThrows(IOException::class.java) { backend.sendManual("a") }
+            backend.handshake(Protocol.manualHello("test", 1))
+            for (button in Protocol.MANUAL_BUTTONS) backend.sendManual(button)
+            withTimeout(3000) { confirmed.await() }
+            assertEquals(Protocol.MANUAL_BUTTONS.toList(), packets.map { it.getValue("button").jsonPrimitive.content })
+            assertEquals((0..8).map { "test:$it" }, packets.map { it.getValue("id").jsonPrimitive.content })
+            now = 3_000_000_000L
+            backend.checkHealth()
+        } finally { backend.close(false); server.close(); http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
+    }
+
+    @Test fun `legacy ready cannot enable manual controls`() = runBlocking<Unit> {
+        val server = MockWebServer()
+        val http = OkHttpClient()
+        val backend = BackendSocket(http, "test", 1, {}, mode = "manual")
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onMessage(ws: WebSocket, text: String) { ws.send(message("ready", ",\"player\":1")) }
+        }))
+        try {
+            backend.open(server.url("/").toString().replaceFirst("http", "ws"), "")
+            try { backend.handshake(Protocol.manualHello("test", 1)); fail("Expected mode rejection") }
+            catch (_: ProtocolException) { }
+        } finally { backend.close(false); server.close(); http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
+    }
+
     private fun message(type: String, extra: String = "", session: String = "test") =
         """{"type":"$type","version":1,"session_id":"$session"$extra}"""
 

@@ -12,8 +12,11 @@ import java.util.concurrent.atomic.AtomicLong
 data class StreamStats(val samples: Long, val discarded: Long, val missed: Long,
                        val battery: Float, val contacts: List<Pair<String, Boolean>>, val rate: Int)
 
+enum class ConnectionPhase { SERVER, REGISTERING, STREAMING, RETRYING }
+data class ConnectionUpdate(val phase: ConnectionPhase, val message: String)
+
 class Controller(
-    private val status: (String) -> Unit,
+    private val status: (ConnectionUpdate) -> Unit,
     private val stats: (StreamStats) -> Unit,
     private val input: (String) -> Unit,
 ) {
@@ -29,7 +32,7 @@ class Controller(
             val backend = BackendSocket(http, UUID.randomUUID().toString(), player, input)
             var graceful = false
             try {
-                status("Łączenie z backendem…")
+                status(ConnectionUpdate(ConnectionPhase.SERVER, "Łączenie z serwerem…"))
                 backend.open(url, token)
                 coroutineScope {
                     var initialized = false
@@ -59,12 +62,12 @@ class Controller(
                                 chunk.contact, chunk.batteryPct,
                             )
                             if (!initialized) {
-                                status("Rejestracja sesji gracza $player…")
+                                status(ConnectionUpdate(ConnectionPhase.REGISTERING, "Serwer potwierdza sesję gracza $player…"))
                                 backend.handshake(Protocol.hello(backend.sessionId, player, session.id.toString(),
                                     session.name, session.hardware.toString(), frame))
                                 layout = frame
                                 initialized = true
-                                status("Transmisja aktywna · gracz $player")
+                                status(ConnectionUpdate(ConnectionPhase.STREAMING, "Transmisja aktywna · gracz $player"))
                             }
                             val initial = checkNotNull(layout)
                             check(frame.channels == initial.channels && frame.sampleRate == initial.sampleRate &&
@@ -94,17 +97,17 @@ class Controller(
                 throw e
             } catch (e: TimeoutCancellationException) {
                 currentCoroutineContext().ensureActive()
-                status("Backend nie odpowiedział w terminie")
+                status(ConnectionUpdate(ConnectionPhase.RETRYING, "Serwer nie odpowiedział w terminie"))
             } catch (e: CancellationException) {
                 graceful = true
                 throw e
             } catch (e: IOException) {
-                status(e.message ?: "Utracono połączenie z backendem")
+                status(ConnectionUpdate(ConnectionPhase.RETRYING, e.message ?: "Utracono połączenie z serwerem"))
             } finally {
                 backend.close(graceful)
             }
             val seconds = minOf(1L shl minOf(attempt++, 4), 10L)
-            status("Ponowne połączenie za ${seconds} s · bez zaległych próbek")
+            status(ConnectionUpdate(ConnectionPhase.RETRYING, "Ponowne połączenie za ${seconds} s"))
             delay(seconds * 1000)
         }
     }

@@ -23,6 +23,7 @@ data class SignalFrame(
 
 object Protocol {
     const val VERSION = 1
+    val MANUAL_BUTTONS = setOf("up", "down", "left", "right", "a", "b", "x", "select", "start")
     private fun FloatArray.json() = JsonArray(map { JsonPrimitive(it) })
     private fun BooleanArray.json() = JsonArray(map { JsonPrimitive(it) })
     private fun base(type: String, session: String, block: JsonObjectBuilder.() -> Unit) = buildJsonObject {
@@ -61,4 +62,19 @@ object Protocol {
     }
 
     fun stop(session: String) = base("stop", session) { put("reason", "user_or_lifecycle") }
+
+    fun manualHello(session: String, player: Int): String {
+        require(player in 1..2)
+        return base("hello", session) {
+            put("role", "controller"); put("mode", "manual"); put("player", player)
+        }
+    }
+
+    fun manual(session: String, seq: Long, player: Int, button: String): String {
+        require(player in 1..2 && button in MANUAL_BUTTONS && seq >= 0)
+        return base("manual", session) {
+            put("seq", seq); put("id", "$session:$seq"); put("player", player)
+            put("button", button); put("action", "press")
+        }
+    }
 }
