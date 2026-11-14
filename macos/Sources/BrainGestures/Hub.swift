@@ -4,7 +4,7 @@ import SwiftUI
 /// Tryby treningu: kazda kategoria ruchu ma wlasna sesje. Sesja = ciagly zapis surowego sygnalu czepka
 /// + znaczniki czasu kazdego bodzca (silnik: tools/session_recorder.py -> training/sessions/).
 enum TrainMode: String, CaseIterable, Identifiable {
-    case eyes, blink, head, frown, jaw
+    case eyes, blink, head, frown, jaw, keys
     var id: String { rawValue }
 
     var title: String {
@@ -14,6 +14,7 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .head: return "Głowa"
         case .frown: return "Czoło"
         case .jaw: return "Szczęka"
+        case .keys: return "Klawiatura"
         }
     }
 
@@ -24,18 +25,19 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .head: return "arrow.up.and.down.and.arrow.left.and.right"
         case .frown: return "eyebrow"
         case .jaw: return "mouth.fill"
+        case .keys: return "keyboard"
         }
     }
 
     var family: String {
         switch self {
-        case .eyes, .blink: return "eyes"
+        case .eyes, .blink, .keys: return "eyes"
         case .head: return "head"
         case .frown, .jaw: return "face"
         }
     }
 
-    var defaultMinutes: Int { self == .eyes || self == .head ? 2 : 1 }
+    var defaultMinutes: Int { self == .keys ? 3 : self == .eyes || self == .head ? 2 : 1 }
 
     /// Polecenie czytane na glos na poczatku sesji (zapisywane tez w danych).
     var instructions: String {
@@ -52,6 +54,10 @@ enum TrainMode: String, CaseIterable, Identifiable {
             return "Na sygnał mocno zmarszcz czoło albo unieś brwi i trzymaj. Na drugi sygnał rozluźnij twarz."
         case .jaw:
             return "Na sygnał szeroko otwórz usta, opuść szczękę i trzymaj. Na drugi sygnał zamknij usta i rozluźnij."
+        case .keys:
+            return "Tu nie ma poleceń, sam decydujesz, kiedy robisz gest. Mrugnij raz i od razu wciśnij W albo S. "
+                + "Spójrz w lewo i wciśnij A, spójrz w prawo i wciśnij D, potem wróć wzrokiem na krzyżyk. "
+                + "Klawisz naciskaj razem z gestem. Między gestami patrz spokojnie na krzyżyk. Escape kończy sesję."
         }
     }
 
@@ -70,8 +76,25 @@ enum TrainMode: String, CaseIterable, Identifiable {
             return "Piknięcie = zmarszcz czoło i trzymaj 2 s, drugi dźwięk = rozluźnij. Przerwy 2,5–4 s."
         case .jaw:
             return "Piknięcie = otwórz szeroko usta i trzymaj 1,5 s, drugi dźwięk = zamknij. Przerwy 2,5–4 s."
+        case .keys:
+            return "Bez poleceń: osoba w czepku sama mruga i patrzy w boki, a każdy gest od razu oznacza klawiszem — "
+                + "W lub S = mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo. Klawisz razem z gestem "
+                + "(tuż przed albo tuż po), gesty co 2–3 s, każdego mniej więcej tyle samo."
         }
     }
+
+    /// Tryb klawiatury: kod klawisza (uklad fizyczny, jak WASD w grach) -> (etykieta, litera).
+    static let keyLabels: [UInt16: (label: String, key: String)] = [
+        13: ("blink", "W"), 1: ("blink", "S"), 0: ("look_left", "A"), 2: ("look_right", "D"),
+    ]
+    static let escapeKeyCode: UInt16 = 53
+}
+
+/// Tryb klawiatury: ostatni oznaczony gest (informacja zwrotna na planszy).
+struct KeyMark: Equatable {
+    let label: String             // blink / look_left / look_right; "wait" = klawisz w czasie spoczynku
+    let key: String
+    let at: Date
 }
 
 /// Co widac na planszy sesji.
@@ -80,6 +103,7 @@ enum SessionDisplay: Equatable {
     case dot                      // kropka (tryb oczu)
     case text(String, Bool)       // napis, czy wyrozniony (moment ruchu)
     case arrow(String, String)    // etykieta kierunku (head_left...), napis
+    case keys                     // tryb klawiatury: krzyzyk, legenda klawiszy, liczniki
 }
 
 /// Odcinek ruchu kropki: x w -1...1 (0 = srodek, -1 lewa krawedz, +1 prawa).
@@ -109,6 +133,8 @@ struct TrainRun: Equatable {
     var counts: [String: Int] = [:]
     var finished = false
     var stoppedEarly = false
+    var keysOpen = false          // tryb klawiatury: klawisze zapisuja gesty (po spoczynku na poczatku)
+    var lastKey: KeyMark?
 }
 
 /// Wszystkie czepki razem: wspolne polecenia glosowe i sesje treningowe.
@@ -128,6 +154,9 @@ final class Hub: ObservableObject {
     @Published var dot: DotSegment?
     private var runTask: Task<Void, Never>?
     private var runTargets: [Engine] = []
+    /// Kto jest nagrywany w trwajacej sesji (tryb klawiatury: jedna osoba, ta, ktora oznacza gesty).
+    var recordedPeople: [String] { runTargets.map(\.person) }
+    private var keyMonitor: Any?
     /// Tryb "Emocje": sesja spokoj -> wywolanie emocji -> ocena (dane osobno od gestow).
     @Published var emoRun: EmoRun?
     var emoTask: Task<Void, Never>?
@@ -165,6 +194,9 @@ final class Hub: ObservableObject {
 
     /// Tylko do testow aplikacji: BRAINGESTURES_TEST_SESSION="head:0.4" startuje sesje po polaczeniu.
     private var testSession = ProcessInfo.processInfo.environment["BRAINGESTURES_TEST_SESSION"]
+    /// Tylko do testow aplikacji: BRAINGESTURES_TEST_KEYS="W,A,D,S" - w trybie klawiatury aplikacja sama "wciska"
+    /// te klawisze co 1,5 s (zdarzenia klawiatury ida ta sama droga co prawdziwe), a na koniec Esc.
+    private let testKeys = ProcessInfo.processInfo.environment["BRAINGESTURES_TEST_KEYS"]
 
     private func engineChanged() {
         objectWillChange.send()
@@ -179,17 +211,20 @@ final class Hub: ObservableObject {
             }
         }
         if sessionOn, active.isEmpty { stopSession() }
+        if sessionOn, run?.mode == .keys, runTargets.contains(where: { !$0.isStreaming }) { stopSession() }
         if let r = emoRun, !r.finished, active.isEmpty { stopEmotions() }
     }
 
     // MARK: sesja treningowa
 
-    func startSession(_ mode: TrainMode, minutes: Double) {
+    /// keysSlot: tryb klawiatury nagrywa jedna osobe (jedna klawiatura) - czepek o tym numerze, domyslnie pierwszy.
+    func startSession(_ mode: TrainMode, minutes: Double, keysSlot: Int? = nil) {
         guard !busy, !active.isEmpty else { return }
         let now = Date()
         run = TrainRun(mode: mode, started: now, minutes: minutes,
                        end: now.addingTimeInterval(15 + baselineS + minutes * 60))
-        runTargets = active
+        runTargets = mode == .keys ? [active.first(where: { $0.slot == keysSlot }) ?? active[0]] : active
+        if mode == .keys { installKeyMonitor() }
         let proto = protocolInfo(mode, minutes: minutes)
         for e in runTargets {
             e.sessionStart(mode: mode.rawValue, protocolInfo: proto, instructions: mode.instructions, at: now)
@@ -198,15 +233,19 @@ final class Hub: ObservableObject {
     }
 
     /// Przerwanie przez operatora: dane do tej chwili zostaja zapisane (status "stopped_early").
+    /// Tryb klawiatury po spoczynku: Esc / "Zakoncz" to zwykle zakonczenie (status "complete").
     func stopSession() {
         guard sessionOn else { return }
+        let normalEnd = run?.mode == .keys && run?.keysOpen == true
         runTask?.cancel()
         runTask = nil
         voice.stop()
-        for e in runTargets { e.sessionStop(status: "stopped_early") }
+        removeKeyMonitor()
+        for e in runTargets { e.sessionStop(status: normalEnd ? "complete" : "stopped_early") }
         run?.finished = true
-        run?.stoppedEarly = true
+        run?.stoppedEarly = !normalEnd
         dot = nil
+        if normalEnd { NSSound(named: "Glass")?.play() }
     }
 
     func closeSessionSummary() { if run?.finished == true { run = nil } }
@@ -249,6 +288,13 @@ final class Hub: ObservableObject {
             p["pause_s"] = [2.5, 4.0]; p["hold_s"] = 2.0
         case .jaw:
             p["pause_s"] = [2.5, 4.0]; p["hold_s"] = 1.5
+        case .keys:
+            p["keys"] = ["W": "blink", "S": "blink", "A": "look_left", "D": "look_right", "Escape": "end of session"]
+            p["key_codes"] = "physical keys (macOS virtual key codes 13 W, 1 S, 0 A, 2 D), independent of layout"
+            p["key_time"] = "unix_time of a 'key' event = NSEvent key-down timestamp (system uptime) converted to "
+                + "the computer clock; key repeats (key held down) are ignored"
+            p["pace"] = "self-paced, no cues; suggested one gesture every 2-3 s, all three about equally often"
+            p["people_recorded_together"] = recordedPeople
         }
         return p
     }
@@ -286,7 +332,7 @@ final class Hub: ObservableObject {
 
         // spoczynek na poczatku kazdej sesji
         run?.phase = "Spoczynek — siedź spokojnie, patrz na środek"
-        run?.display = mode == .eyes ? .dot : .fixation
+        run?.display = mode == .eyes ? .dot : mode == .keys ? .keys : .fixation
         event("baseline_start", label: "rest")
         guard await wait(baselineS) else { return }
         event("baseline_end", label: "rest")
@@ -298,14 +344,87 @@ final class Hub: ObservableObject {
         case .head: await runHead()
         case .frown: await runHold(label: "frown", now: "ZMARSZCZ CZOŁO", relax: "Rozluźnij", hold: 2.0)
         case .jaw: await runHold(label: "jaw", now: "OTWÓRZ USTA", relax: "Zamknij i rozluźnij", hold: 1.5)
+        case .keys: await runKeys()
         }
         guard sessionOn, !Task.isCancelled else { return }
+        removeKeyMonitor()
         for e in runTargets { e.sessionStop(status: "complete") }
         run?.finished = true
         dot = nil
         runTask = nil
         NSSound(named: "Glass")?.play()
         await voice.say("Koniec. Dziękuję.")
+    }
+
+    // MARK: tryb klawiatury
+
+    /// Osoba sama robi gesty i oznacza je klawiszami; sesja trwa do konca czasu albo do Esc.
+    @MainActor
+    private func runKeys() async {
+        run?.display = .keys
+        run?.phase = "Mrugaj i patrz w boki — oznaczaj klawiszami"
+        run?.keysOpen = true
+        event("instruction", details: ["text": "Klawisze aktywne: W/S mrugnięcie, A lewo, D prawo", "spoken": false])
+        cueSound()
+        if let keys = testKeys { Task { @MainActor [weak self] in await self?.pressTestKeys(keys) } }
+        while timeLeft {
+            guard await wait(0.25) else { return }
+        }
+    }
+
+    /// Klawisze lapiemy w calym oknie (monitor zdarzen aplikacji), niezaleznie od tego, co ma fokus.
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] ev in
+            guard let self, self.sessionOn, self.run?.mode == .keys else { return ev }
+            if ev.modifierFlags.contains(.command) { return ev }   // Cmd+Q itp. dzialaja jak zwykle
+            self.handleKey(ev)
+            return nil   // pozostale klawisze nie trafiaja do pol tekstowych pod plansza
+        }
+    }
+
+    @MainActor
+    private func pressTestKeys(_ keys: String) async {
+        let codes: [String: UInt16] = ["W": 13, "S": 1, "A": 0, "D": 2]
+        for k in keys.uppercased().split(separator: ",").map(String.init) + ["ESC"] {
+            guard await wait(1.5) else { return }
+            let code = codes[k] ?? TrainMode.escapeKeyCode
+            let ch = code == TrainMode.escapeKeyCode ? "\u{1b}" : k.lowercased()
+            if let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                         timestamp: ProcessInfo.processInfo.systemUptime,
+                                         windowNumber: NSApp.windows.first(where: \.isVisible)?.windowNumber ?? 0,
+                                         context: nil, characters: ch, charactersIgnoringModifiers: ch,
+                                         isARepeat: false, keyCode: code) {
+                NSApp.postEvent(ev, atStart: false)
+            }
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let m = keyMonitor { NSEvent.removeMonitor(m) }
+        keyMonitor = nil
+    }
+
+    private func handleKey(_ ev: NSEvent) {
+        if ev.keyCode == TrainMode.escapeKeyCode {
+            stopSession()
+            return
+        }
+        guard !ev.isARepeat, let k = TrainMode.keyLabels[ev.keyCode] else { return }
+        let now = Date()
+        guard run?.keysOpen == true, timeLeft else {
+            run?.lastKey = KeyMark(label: "wait", key: k.key, at: now)
+            return
+        }
+        // chwila wcisniecia wg systemu (NSEvent.timestamp = czas od startu systemu), nie chwila obslugi zdarzenia
+        let lag = ProcessInfo.processInfo.systemUptime - ev.timestamp
+        let at = (0...1).contains(lag) ? now.addingTimeInterval(-lag) : now
+        let trial = (run?.trials ?? 0) + 1
+        event("key", label: k.label, trial: trial,
+              details: ["key": k.key, "key_code": Int(ev.keyCode), "source": "keyboard",
+                        "handler_delay_s": (lag * 1000).rounded() / 1000], at: at)
+        count(k.label)
+        run?.lastKey = KeyMark(label: k.label, key: k.key, at: now)
     }
 
     private func count(_ label: String) {

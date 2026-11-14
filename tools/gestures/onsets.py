@@ -6,6 +6,9 @@ sygnale: zyroskop dla glowy, wychylenie Fp dla mrugniec i oczu, obwiednia 30-110
 
     onset, weak = detect_onset(sig, label, cue, limit, fs)     # sig = features.filter_all(...)
 
+Tryb klawiatury (osoba sama oznacza gest klawiszem): detect_key_onset(sig, label, key, fs) - ruchu szukamy
+po obu stronach klawisza; eye_moves - czy w odcinku bez klawisza oczy sie ruszaly.
+
 weak=True: ruchu zgodnego z etykieta nie widac (osoba nie zareagowala, ruch w inna strone albo gest, ktorego
 ten czepek u tej osoby nie widzi). Wtedy onset = cue + DEFAULT_REACTION_S.
 """
@@ -87,3 +90,95 @@ def detect_onset(sig: dict[str, np.ndarray], label: str, cue: int, limit: int, f
         return cue + int(round(DEFAULT_REACTION_S * fs)), True
     level = max(1.0, ONSET_FRACTION * float(act.max()))
     return lo + int(np.argmax(act >= level)), False
+
+
+# --- tryb klawiatury (sesje "keys") ------------------------------------------------------------------------
+# Osoba sama robi gest i oznacza go klawiszem (W/S mrugniecie, A/D spojrzenie) mniej wiecej w tej samej chwili -
+# raz przed ruchem, raz po nim. Poczatku ruchu szukamy wiec po obu stronach klawisza. Gesty ida jeden po drugim,
+# wiec w oknie szukania bywa kilka ruchow: mrugniecie mimowolne albo powrot oczu z poprzedniego spojrzenia
+# (powrot z lewej to ruch w prawo). Wybieramy ruch, ktory zaczyna sie najblizej klawisza. Ruch rozpoznajemy po
+# PREDKOSCI zmiany sygnalu, nie po samym wychyleniu: filtr 0,2 Hz zostawia po kazdym ruchu dlugie odbicie w druga
+# strone (po mrugnieciu ~0,8 s ponizej zera, po powrocie z lewej wychylenie przechodzi na prawo), przez co dwa
+# ruchy w odstepie < 1 s zlewaja sie w jeden. Mrugniecie = szybka zmiana (Fp1+Fp2)/2 (obie elektrody w gore),
+# spojrzenie = szybka zmiana Fp1-Fp2 w strone etykiety (skok wzroku; mrugniecie prawie jej nie zmienia).
+KEY_BEFORE_S, KEY_AFTER_S = 0.8, 0.5   # okno szukania wzgledem klawisza (jak session_recorder.KEY_SPAN_S)
+KEY_DEFAULT_S = 0.0     # ruchu nie widac: przyjmujemy poczatek w chwili klawisza
+KEY_PRE_S = 1.2         # tlo (poziom i rozrzut sladu): odcinek tuz przed oknem szukania
+KEY_MIN_PEAK = 0.5      # kandydat musi miec co najmniej polowe sily najsilniejszego ruchu w oknie
+KEY_MERGE_S = 0.1       # przerwy krotsze niz to nie dziela ruchu na dwa
+SACC_SMOOTH_S = 0.04    # predkosc wygladzana w tym oknie
+SACC_K, SACC_MIN_UVS = 4.0, 150.0   # prog predkosci skoku wzroku: krotnosc rozrzutu tla, minimum [uV/s]
+BLINK_VK, BLINK_MIN_UVS = 5.0, 150.0  # prog predkosci mrugniecia (u Oliwiera mrugniecia maja ok. 30 uV, 250-400 uV/s)
+
+
+def _velocity(x: np.ndarray, fs: float) -> np.ndarray:
+    k = max(1, int(SACC_SMOOTH_S * fs))
+    return np.convolve(np.diff(x, prepend=x[:1]) * fs, np.ones(k) / k, mode="same")
+
+
+def _key_traces(sig: dict[str, np.ndarray], label: str, a: int, b: int, fs: float
+                ) -> list[tuple[np.ndarray, float, float]]:
+    """Jak _traces, ale dla oczu predkosc zamiast wychylenia: mrugniecie = |d/dt (Fp1+Fp2)/2|,
+    spojrzenie = d/dt (Fp1-Fp2) w strone etykiety."""
+    fp2, fp1 = sig["eog"][2, a:b], sig["eog"][3, a:b]
+    if label == "blink":
+        return [(np.abs(_velocity((fp1 + fp2) / 2, fs)), BLINK_VK, BLINK_MIN_UVS)]
+    if label in LOOK:
+        return [(LOOK[label] * _velocity(fp1 - fp2, fs), SACC_K, SACC_MIN_UVS)]
+    return _traces(sig, label, a, b, fs)
+
+
+def _moves(act: np.ndarray, fs: float) -> list[tuple[int, float]]:
+    """[(poczatek, sila)] ruchow w aktywnosci (>= 1 = ponad tlo). Ruch trwajacy juz na poczatku okna pomijamy."""
+    above = act >= 1.0
+    starts = list(np.flatnonzero(above & ~np.r_[False, above[:-1]]))
+    ends = list(np.flatnonzero(above & ~np.r_[above[1:], False]) + 1)
+    runs: list[list[int]] = []
+    for s, e in zip(starts, ends):
+        if runs and s - runs[-1][1] < int(KEY_MERGE_S * fs):
+            runs[-1][1] = e
+        else:
+            runs.append([s, e])
+    out = []
+    for s, e in runs:
+        if s == 0:
+            continue
+        peak = float(act[s:e].max())
+        out.append((s + int(np.argmax(act[s:e] >= max(1.0, ONSET_FRACTION * peak))), peak))
+    return out
+
+
+def detect_key_onset(sig: dict[str, np.ndarray], label: str, key: int, fs: float,
+                     lo: int | None = None, hi: int | None = None) -> tuple[int, bool]:
+    """(probka poczatku ruchu, weak) dla gestu oznaczonego klawiszem w probce `key`. Szuka od KEY_BEFORE_S przed
+    do KEY_AFTER_S po klawiszu, w granicach [lo, hi) (np. polowa drogi do sasiednich klawiszy). Z kilku ruchow
+    bierze ten najblizej klawisza; weak=True (i poczatek = klawisz + KEY_DEFAULT_S), gdy ruchu nie widac."""
+    n = sig["gyro"].shape[1]
+    s0 = max(0, key - int(round(KEY_BEFORE_S * fs)), 0 if lo is None else lo)
+    s1 = min(n, key + int(round(KEY_AFTER_S * fs)), n if hi is None else hi)
+    default = key + int(round(KEY_DEFAULT_S * fs))
+    a = max(0, s0 - int(KEY_PRE_S * fs))
+    if s1 - s0 < 2 or s0 - a < int(0.3 * fs):
+        return default, True
+    act = np.zeros(s1 - s0)
+    for tr, k, floor in _key_traces(sig, label, a, s1, fs):
+        pre = tr[: s0 - a - int(0.05 * fs)]
+        thr = max(k * _spread(pre), floor)
+        act = np.maximum(act, (tr[s0 - a:] - np.median(pre)) / thr)
+    moves = _moves(act, fs)
+    if not moves:
+        return default, True
+    strong = max(p for _, p in moves)
+    on = min((m for m, p in moves if p >= KEY_MIN_PEAK * strong), key=lambda m: abs(s0 + m - default))
+    return s0 + on, False
+
+
+def eye_moves(sig: dict[str, np.ndarray], a: int, b: int, ref: tuple[int, int], fs: float) -> bool:
+    """Czy w probkach [a, b) widac mrugniecie albo skok wzroku w ktoras strone, wzgledem tla z odcinka
+    ref = (od, do) (np. spoczynku na poczatku sesji). Okna miedzy klawiszami: osoba mogla mrugnac bez klawisza."""
+    r0, r1 = ref
+    for label in ("blink", "look_left", "look_right"):
+        for (rt, k, floor), (wt, _, _) in zip(_key_traces(sig, label, r0, r1, fs), _key_traces(sig, label, a, b, fs)):
+            if wt.size and ((wt - np.median(rt)) / max(k * _spread(rt), floor)).max() >= 1.0:
+                return True
+    return False

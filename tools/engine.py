@@ -6,6 +6,9 @@ Polecenia:  {"cmd":"scan"}  {"cmd":"connect","name":"BA HALO 208"}  {"cmd":"demo
             sesja treningowa (ekran Trening, zapis do training/sessions/, patrz session_recorder.py):
             {"cmd":"session_start","mode":"blink","person":"Ania","unix_time":...,"protocol":{...},"instructions":"..."}
             {"cmd":"session_event","unix_time":...,"event":"cue","label":"blink","trial":3,"details":{...}}
+            tryb klawiatury (mode "keys"): kazdy klawisz to zdarzenie "key"; unix_time = chwila wcisniecia klawisza
+            (znacznik systemu), ten sam zegar co czas przyjscia probek - session_recorder przelicza go na nr probki:
+            {"cmd":"session_event","unix_time":...,"event":"key","label":"look_left","trial":7,"details":{"key":"A"}}
             {"cmd":"session_stop","unix_time":...,"status":"complete"}
 Zdarzenia:  ready, model, status, devices, battery, prediction, signal, gesture, position, session, sessions_state
 """

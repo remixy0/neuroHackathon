@@ -8,6 +8,14 @@ Z kazdej proby (sygnal GO -> ruch) bierzemy:
 Z ciszy na poczatku sesji (baseline): okna "rest" w kawalkach BASE_CHUNK_S (kawalek = osobna "proba").
 Powroty (glowa do srodka, kropka do srodka, rozluznienie) i wodzenie za kropka nie daja okien: to ruch,
 ale nie gest, ktory chcemy zglaszac - nie uczymy go ani jako gestu, ani jako spoczynku.
+
+Tryb klawiatury (mode "keys", bez polecen: osoba sama mruga / patrzy w bok i oznacza gest klawiszem):
+  event  - jak wyzej, ale poczatek ruchu szukany wokol klawisza (onsets.detect_key_onset), a okna koncza sie
+           najpozniej na poczatku nastepnego oznaczonego ruchu;
+  gap    - okna miedzy klawiszami (GAP_AFTER_S po ruchu .. GAP_BEFORE_S przed nastepnym klawiszem) -> spoczynek
+           z niska waga (model.GAP_WEIGHT): osoba mogla mrugnac bez klawisza; "moving", gdy w oknie widac
+           mrugniecie / skok wzroku (onsets.eye_moves) albo ruch glowy (pomijane). Nie ma okien "quiet" -
+           przed klawiszem osoba wlasnie robi gest.
 """
 from __future__ import annotations
 
@@ -17,7 +25,7 @@ from .data import CLASSES
 from .dataset import QUIET_MAX_DEG, QUIET_MAX_DPS, Windows
 from .features import WIN_S, feature_names, filter_all, window_features
 from .model import Normalizer
-from .onsets import detect_onset
+from .onsets import detect_key_onset, detect_onset, eye_moves
 from .recognizer import BASELINE_S, HOP_S, MIN_BASELINE_S
 from .sessions import Session
 
@@ -32,6 +40,10 @@ QUIET_GAP_S = 1.0        # okno spoczynku zaczyna sie najwczesniej tyle po sygna
 BASE_CHUNK_S = 2.5
 BASE_STEP_S = 0.5
 GESTURE_KINDS = ("instructed_hold", "expected_response", "dot_jump")
+# tryb klawiatury: okna spoczynku miedzy klawiszami
+GAP_AFTER_S = 2.5    # najwczesniejszy poczatek okna po poczatku oznaczonego ruchu (gest + powrot oczu)
+GAP_BEFORE_S = 1.0   # najpozniejszy koniec okna przed nastepnym klawiszem (ruch zaczyna sie do 0,8 s przed nim)
+GAP_STEP_S = 0.5
 
 
 def _head_moves(v: np.ndarray, names: list[str]) -> bool:
@@ -51,6 +63,22 @@ def running_baseline(ends: np.ndarray, S: np.ndarray, end: int) -> np.ndarray:
     historii, gdzie na zywo dziala tlo przecietnej osoby) bierzemy pierwsze MIN_BASELINE_S sekund."""
     k = max(int(np.searchsorted(ends, end, side="right")), min(len(ends), int(MIN_BASELINE_S / HOP_S)))
     return Normalizer.baseline(S[max(0, k - int(BASELINE_S / HOP_S)):k])
+
+
+def key_onsets(s: Session, sig: dict[str, np.ndarray] | None = None) -> list[dict]:
+    """Klawisze sesji trybu klawiatury, po kolei: [{trial, label, key, onset, weak}] (probki). Poczatku ruchu
+    szukamy wokol klawisza, najdalej w polowie drogi do sasiedniego klawisza."""
+    sig = filter_all(s.x, s.channels, s.fs) if sig is None else sig
+    keys = sorted((e for e in s.events if e["event"] == "key" and e["label"] in CLASSES and e["label"] != "rest"),
+                  key=lambda e: e["sample"])
+    out = []
+    for i, e in enumerate(keys):
+        lo = (keys[i - 1]["sample"] + e["sample"]) // 2 if i else None
+        hi = (e["sample"] + keys[i + 1]["sample"]) // 2 if i + 1 < len(keys) else None
+        onset, weak = detect_key_onset(sig, e["label"], e["sample"], s.fs, lo=lo, hi=hi)
+        out.append({"trial": int(e["trial"]) if e["trial"] is not None else i + 1, "label": e["label"],
+                    "key": e["sample"], "onset": onset, "weak": weak})
+    return out
 
 
 def session_rows(s: Session, names: list[str] | None = None
@@ -103,7 +131,36 @@ def session_rows(s: Session, names: list[str] | None = None
                         break
                     add(end, label, "hold", trial, weak)
         prev_end = max(prev_end, b)
+    keys = key_onsets(s, sig)
+    for i, k in enumerate(keys):
+        nxt = keys[i + 1]["onset"] if i + 1 < len(keys) else n   # okno nie siega poczatku nastepnego gestu
+        for off in EVENT_OFFSETS:
+            end = k["onset"] + int(round(off * fs))
+            if end <= nxt:
+                add(end, k["label"], "event", k["trial"], k["weak"])
+    if keys:
+        _gap_rows(s, sig, keys, add, rows, names)
     return rows
+
+
+def _gap_rows(s: Session, sig: dict[str, np.ndarray], keys: list[dict], add, rows: list, names: list[str]) -> None:
+    """Tryb klawiatury: okna spoczynku (kind "gap") miedzy klawiszami; "moving", gdy cos sie ruszalo."""
+    fs, n, w = s.fs, s.n, int(WIN_S * s.fs)
+    ev = {e["event"]: e["sample"] for e in s.events if e["event"] in ("baseline_end", "session_end")}
+    base = next(((iv["start_sample"], iv["end_sample"]) for iv in s.intervals if iv["kind"] == "baseline"), (0, n))
+    after, before = int(GAP_AFTER_S * fs), int(GAP_BEFORE_S * fs)
+    spans = []   # (od, do, nr proby, do ktorej naleza okna)
+    if "baseline_end" in ev:
+        spans.append((ev["baseline_end"] + after, keys[0]["key"] - before, 0))
+    for k, nxt in zip(keys, keys[1:]):
+        spans.append((k["onset"] + after, nxt["key"] - before, k["trial"]))
+    spans.append((keys[-1]["onset"] + after, min(n, ev.get("session_end", n)), keys[-1]["trial"]))
+    step = int(round(GAP_STEP_S * fs))
+    for a, b, trial in spans:
+        for end in range(a + w, b + 1, step):
+            v = add(end, "rest", "gap", trial)
+            if v is not None and (eye_moves(sig, end - w, end, base, fs) or _head_moves(v, names)):
+                rows[-1] = rows[-1][:2] + ("moving",) + rows[-1][3:]
 
 
 def build(sessions: list[Session]) -> Windows:

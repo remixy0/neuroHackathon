@@ -24,7 +24,8 @@ class Windows:
     trial: np.ndarray     # indeks proby (do walidacji: okna jednej proby nigdy w treningu i tescie naraz)
     person: np.ndarray
     kind: np.ndarray      # "event" (okno wokol gestu), "rest" (proba spoczynku), "quiet" (przed kliknieciem),
-                          # "moving" (przed kliknieciem, ale z ruchem glowy - pomijane w treningu i ocenie)
+                          # "moving" (przed kliknieciem, ale z ruchem glowy - pomijane w treningu i ocenie),
+                          # "hold" (trzymanie czola/szczeki), "gap" (tryb klawiatury: miedzy klawiszami, niska waga)
     stim: np.ndarray      # okno z proby "spojrzenie za kropka" (male ruchy oka)
     names: list[str]
     # tylko okna z sesji treningowych (gestures/session_windows.py):

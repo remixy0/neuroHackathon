@@ -1,4 +1,4 @@
-"""Nagrywanie sesji treningowych (ekran Trening: oczy, mruganie, glowa, czolo, szczeka) do plikow.
+"""Nagrywanie sesji treningowych (ekran Trening: oczy, mruganie, glowa, czolo, szczeka, klawiatura) do plikow.
 
 Jedna sesja = ciagly surowy sygnal czepka + znaczniki czasu bodzcow z aplikacji, zapisane tak, zeby czlowiek
 albo zewnetrzne AI zrozumialo dane bez tego kodu (opis formatu: DATASET_README ponizej -> training/README.md).
@@ -27,6 +27,8 @@ import numpy as np
 
 FORMAT = "braingestures-session/1"
 PRE_ROLL_S = 2.0   # tyle sekund sygnalu sprzed startu sesji dopisujemy na poczatek (rozbieg filtrow)
+# tryb klawiatury: odcinek key_press = od 0,8 s przed do 0,5 s po klawiszu - tam zaczyna sie oznaczony ruch
+KEY_SPAN_S = (0.8, 0.5)
 
 CHANNEL_INFO: dict[str, tuple[str, str, str]] = {
     "O1": ("eeg", "uV", "EEG electrode O1 (10-20 system), left occipital (back of head). Raw, unfiltered, large DC offset."),
@@ -98,6 +100,20 @@ MODES: dict[str, dict] = {
             "holds; after hold_s a second beep ('return' event, label relax): the person closes the mouth and "
             "relaxes. Then a pause."),
     },
+    "keys": {
+        "title_pl": "Klawiatura - mrugniecia i spojrzenia",
+        "labels": ["blink", "look_left", "look_right"],
+        "paradigm": (
+            "Self-paced, no cues. Fixation cross on a black screen. The person wearing the headset performs eye "
+            "gestures in their own rhythm and labels each one on the keyboard at the same moment: W or S = blink "
+            "(label blink), A = look to the LEFT and back to the centre (label look_left), D = look to the RIGHT "
+            "and back (label look_right). Every key press is a 'key' event (details.key = the key, unix_time = "
+            "the OS key-down timestamp, same clock as the samples). The key falls roughly at the same time as the "
+            "movement - before or after it by up to a few hundred ms - so the movement onset has to be found in "
+            "the signal around the key (intervals.csv kind key_press: 0.8 s before to 0.5 s after the key). "
+            "Time between key presses is NOT reliable rest: the person may blink or move the eyes without "
+            "pressing a key. Esc ends the session."),
+    },
 }
 
 EVENT_TYPES = {
@@ -109,6 +125,8 @@ EVENT_TYPES = {
     "cue": "GO signal (beep): the person should perform the movement given in 'label' now.",
     "return": "Second signal: return to neutral / relax (label center or relax).",
     "stim_move": "Dot starts moving: from x to x_to over duration_s (easing in details).",
+    "key": "Mode keys: the person pressed a key to label the gesture they are doing now (label; details.key "
+           "W/S = blink, A = look_left, D = look_right). unix_time = OS key-down timestamp.",
     "pause": "Session paused by the operator.",
     "resume": "Session resumed.",
     "session_end": "Last event of the session.",
@@ -128,10 +146,13 @@ Older data (single-trial clips, `samples.jsonl` format) is archived elsewhere an
 | `head` | turns / nods the head after a beep, holds, returns after a second beep | `head_left`, `head_right`, `head_up`, `head_down`, `center` |
 | `frown` | frowns / raises eyebrows after a beep, holds, relaxes after a second beep | `frown`, `relax` |
 | `jaw` | opens the mouth / jaw after a beep, holds, closes after a second beep | `jaw`, `relax` |
+| `keys` | no cues: blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S blink, A left, D right) | `blink`, `look_left`, `look_right` |
 
 Every session starts with a quiet **baseline** (`baseline_start` .. `baseline_end`, label `rest`): the person
 sits still and looks at the centre. Time between trials is also "rest", but the person may blink or
 adjust there. The exact protocol and its parameters are in `session.json` -> `protocol`.
+In mode `keys` there are no stimuli at all: the `key` events are labels given by the person, and time
+between key presses is not reliable rest (unlabelled blinks / eye movements are likely).
 
 ## Files in each session folder
 - `eeg.csv` - one row per sample (fs = 250 Hz). Columns:
@@ -153,8 +174,10 @@ adjust there. The exact protocol and its parameters are in `session.json` -> `pr
   - `expected_response` - mode blink: 1.0 s after each cue, the blink is somewhere inside;
   - `dot_jump` - mode eyes: dot jumped to `x_to` and stays there until `end` (label `look_left`/`look_right`;
     `center` = dot back in the middle);
-  - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`).
-  Spans are stimulus-locked: the body follows 0.2-0.6 s later. Time not covered by any span is
+  - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`);
+  - `key_press` - mode keys: 0.8 s before to 0.5 s after a key press; the labelled movement starts somewhere
+    inside (the person presses the key roughly together with the gesture).
+  Spans of the other modes are stimulus-locked: the body follows 0.2-0.6 s later. Time not covered by any span is
   "between trials" - the person rests but may blink, swallow or adjust.
 - `stimulus.csv` (mode `eyes` only) - `sample`, `t_s`, `dot_x`: horizontal dot position for every EEG
   sample, -1 = left edge, 0 = centre, +1 = right edge of the window (see `protocol.screen` for size in px/mm).
@@ -167,7 +190,9 @@ adjust there. The exact protocol and its parameters are in `session.json` -> `pr
 `unix_time_of_sample_0` is a low percentile of (`arrival_unix - sample/fs`) (the least-delayed packets).
 Remaining uncertainty: Bluetooth latency (~20-60 ms, not measured), screen/audio latency (~10-30 ms) and the
 person's reaction time (~0.2-0.6 s after a `cue`). For precise movement onsets detect them in the signal
-(gyroscope for head, Fp1/Fp2 for eyes and blinks, 30-110 Hz power for muscles), searching after each cue.
+(gyroscope for head, Fp1/Fp2 for eyes and blinks, 30-110 Hz power for muscles), searching after each cue
+(mode `keys`: around each key press, see `key_press`). Key presses use the OS key-down timestamp, so they carry
+no screen/audio latency, only the person's own timing.
 
 ## Loading (Python)
 ```python
@@ -303,7 +328,7 @@ class SessionRecorder:
         n_intervals = self._write_intervals(ev)
         counts: dict[str, dict[str, int]] = {}
         for e in ev:
-            if e["event"] in ("cue", "stim_move") and e["label"]:
+            if e["event"] in ("cue", "stim_move", "key") and e["label"]:
                 counts.setdefault(e["event"], {})
                 counts[e["event"]][e["label"]] = counts[e["event"]].get(e["label"], 0) + 1
         end = time.time()
@@ -369,6 +394,10 @@ class SessionRecorder:
             elif k == "return" and open_cue is not None:
                 add(open_cue["sample"], e["sample"], open_cue["label"], "instructed_hold", open_cue["trial"])
                 open_cue = None
+            elif k == "key":
+                before, after = KEY_SPAN_S
+                add(e["sample"] - int(round(before * fs)), e["sample"] + int(round(after * fs)), e["label"], "key_press",
+                    e["trial"])
             elif k == "stim_move":
                 nxt = next((x["sample"] for x in ev[i + 1:] if x["event"] in ("stim_move", "session_end")), end_s)
                 sweep = (e["details"] or {}).get("kind") == "sweep"
@@ -442,7 +471,7 @@ def write_index(root: Path) -> None:
             m = json.loads(f.read_text())
         except Exception:  # noqa: BLE001
             continue
-        n_trials = sum((m.get("counts") or {}).get("cue", {}).values())
+        n_trials = sum((m.get("counts") or {}).get("key" if m.get("mode") == "keys" else "cue", {}).values())
         if m.get("mode") == "eyes":
             n_trials = sum((m.get("counts") or {}).get("stim_move", {}).get(k, 0) for k in ("look_left", "look_right"))
         rows.append([m.get("session_id"), m.get("person"), m.get("mode"), m.get("created_iso"),
@@ -476,6 +505,8 @@ def summary(root: Path) -> dict:
         c = m.get("counts") or {}
         if m.get("mode") == "eyes":
             d["trials"] += sum(c.get("stim_move", {}).get(k, 0) for k in ("look_left", "look_right", "pursuit"))
+        elif m.get("mode") == "keys":
+            d["trials"] += sum(c.get("key", {}).values())
         else:
             d["trials"] += sum(c.get("cue", {}).values())
     return out

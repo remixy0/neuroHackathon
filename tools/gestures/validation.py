@@ -114,6 +114,7 @@ def window_metrics(W: Windows, P: np.ndarray) -> dict:
 BLINK_SPAN_S = 2.0        # mrugniecie: zgloszenie liczy sie do tylu sekund po sygnale
 HIT_AFTER_END_S = 0.5     # gesty trzymane: zgloszenie liczy sie do tylu sekund po sygnale powrotu
 RETURN_SPAN_S = 2.0       # potem tyle sekund powrotu (glowa/oczy do srodka, rozluznienie): ani trafienie, ani alarm
+KEY_HIT_AFTER_S = 1.0     # tryb klawiatury: zgloszenie liczy sie do tylu sekund po koncu odcinka key_press
 STREAM_WARMUP_S = 3.0
 
 
@@ -134,6 +135,10 @@ def session_spans(s) -> tuple[list[tuple[float, float, str]], list[tuple[float, 
         elif iv["kind"] == "instructed_hold" or (iv["kind"] == "dot_jump" and iv["label"] in CLASSES):
             trials.append((a, b + HIT_AFTER_END_S, iv["label"]))
             excluded.append((b + HIT_AFTER_END_S, b + HIT_AFTER_END_S + RETURN_SPAN_S))
+        elif iv["kind"] == "key_press":                    # ruch od 0,8 s przed do 0,5 s po klawiszu
+            trials.append((a, b + KEY_HIT_AFTER_S, iv["label"]))
+            if iv["label"] in ("look_left", "look_right"):     # oczy wracaja na srodek
+                excluded.append((b + KEY_HIT_AFTER_S, b + KEY_HIT_AFTER_S + RETURN_SPAN_S))
         elif iv["kind"] in ("dot_jump", "dot_sweep"):       # powrot kropki do srodka, wodzenie wzrokiem
             excluded.append((a, b + 1.0))
     return trials, excluded

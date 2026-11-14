@@ -91,15 +91,19 @@ def feature_mask(names: list[str]) -> np.ndarray:
 HOLD_WEIGHT = 0.5
 # Proby, w ktorych ruchu zgodnego z etykieta nie widac w sygnale (onsets.detect_onset: weak).
 WEAK_WEIGHT = 0.3
+# Tryb klawiatury: okna miedzy klawiszami jako spoczynek. Osoba nie dostaje polecen i moze mrugnac albo spojrzec
+# bez klawisza; okna z widocznym ruchem oczu sa pomijane (session_windows: "moving"), ale slabszy ruch moze zostac.
+GAP_WEIGHT = 0.25
 
 
 def sample_weights(W: Windows) -> np.ndarray:
-    """Wagi okien: tlo, trzymanie, proby bez widocznego ruchu i spojrzenia za kropka slabiej,
+    """Wagi okien: tlo, trzymanie, okna miedzy klawiszami, proby bez widocznego ruchu i spojrzenia za kropka slabiej,
     potem wyrownanie lacznej wagi klas."""
     w = np.ones(len(W))
     w[W.kind == "quiet"] = QUIET_WEIGHT
     w[W.kind == "moving"] = 0.0
     w[W.kind == "hold"] = HOLD_WEIGHT
+    w[W.kind == "gap"] = GAP_WEIGHT
     w[(W.kind == "event") & W.stim] = STIM_WEIGHT
     if W.weak is not None:
         w[W.weak.astype(bool)] *= WEAK_WEIGHT
