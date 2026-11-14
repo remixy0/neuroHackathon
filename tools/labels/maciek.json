@@ -1,0 +1,21 @@
+{
+  "recording": "../../resources/maciek-1_ses-S001_task-_run-001_20261114_121223_eeg.db",
+  "wal": null,
+  "offset_s": -1.0,
+  "events": [
+    [7, "blink"], [9, "blink"], [10, "blink"],
+    [11, "eyes_close"], [13, "eyes_open"], [14, "eyes_close"], [15, "eyes_open"], [16.5, "eyes_close"], [18, "eyes_open"],
+    [20, "look_left"], [21, "look_right"], [23, "look_left"], [24, "look_right"], [25.5, "look_left"], [27, "look_right"],
+    [29, "look_down"], [30, "look_up"], [31.5, "look_down"], [33, "look_up"], [35, "look_down"], [36, "look_up"],
+    [37, "mouth_right"], [39, "mouth_left"], [41, "mouth_right"], [43, "mouth_left"], [44, "mouth_right"], [46, "mouth_left"],
+    [48.5, "jaw"], [51.5, "jaw"], [53.5, "jaw"],
+    [57, "head_left"], [58, "head_right"], [61, "head_left"], [62, "head_right"], [64, "head_left"], [66, "head_right"],
+    [68, "head_up"], [70, "head_down"], [72, "head_up"], [73, "head_down"], [75, "head_up"], [77, "head_down"],
+    [80, "frown"], [82, "frown"], [84, "frown"]
+  ],
+  "intervals": [
+    [1, 6, "rest"], [90, 99, "rest"],
+    [101, 108, "strobe_4hz"], [110, 122, "strobe_6hz"], [125, 138, "strobe_8hz"], [141, 152, "strobe_15hz"]
+  ],
+  "notes": "Konce stroboskopu nie byly zapisane - przyjete do poczatku nastepnego bloku z marginesem."
+}
