@@ -16,6 +16,16 @@ Przy zerwaniu połączenia pad jest zastępowany ekranem łączenia; stare naci�
 nie są odtwarzane. Zakończenie / Wstecz / opuszczenie aplikacji rozłączają sesję.
 SELECT i START wysyłają przyciski do backendu, nie zarządzają lokalną sesją.
 
+Od wersji 0.4.0 pad ma osobny widok pełnoekranowy bez przewijania i nagłówków
+konfiguracji. W poziomie krzyżak jest po lewej, START/SELECT pośrodku, a A/B/X
+po prawej. W pionie elementy układają się w rzędach. A/B/X mają jednakowy
+rozmiar, a litery są umieszczone wewnątrz przycisków. Przycisk ✕ kończy sesję
+i wraca do konfiguracji; paski systemowe można chwilowo wysunąć gestem od krawędzi.
+
+Obrót i zmiana rozmiaru okna przebudowują wyłącznie widok. Zachowane są wybrany
+gracz, połączenie WebSocket, identyfikator sesji i numeracja zdarzeń. Dotyczy to
+również przejścia przez konfigurację w pionie i późniejszego obrotu pada w poziom.
+
 Do sprawdzenia połączenia bez właściwego backendu użyj
 [testowego odbiornika](test-server/README.md): `cd mobile/test-server && npm install && npm start`.
 Wypisuje dane w terminalu i podaje adres WebSocket do wpisania w telefonie.
@@ -60,8 +70,8 @@ Aplikacja korzysta z trzech lokalnych bibliotek SDK (bez LSL) z `BrainAccessKit-
 ## Zakres pierwszej wersji
 
 - Działa na otwartym ekranie aplikacji; ekran pozostaje włączony podczas sesji.
-- Wyjście do innej aplikacji, zablokowanie telefonu lub obrót ekranu zatrzymują
-  strumień i rozłączają HALO. Brak usługi działającej w tle w tej wersji.
+- Wyjście do innej aplikacji lub zablokowanie telefonu zatrzymują strumień
+  i rozłączają HALO. Sam obrót nie zatrzymuje sesji. Brak usługi działającej w tle.
 - Awaria WebSocket uruchamia ponowienie z nową sesją, bez zaległych próbek.
 - Zerwanie BLE / brak danych wymaga ponownego wyboru opaski.
 - W trybie HALO wysyłany jest surowy sygnał w jednostkach SDK; brak modelu na telefonie.
@@ -83,7 +93,9 @@ Testy JVM sprawdzają układ i walidację próbek, dokładność liczników, `nu
 nieobecnego czujnika oraz rzeczywistą komunikację WebSocket przez MockWebServer:
 hello/ready, samples/ack, manual/ack, komendę, stop, złą sesję i brak ACK. Test pada
 w Robolectric sprawdza rozmiary pól dotyku, brak nakładania przycisków i kliknięcia
-na czterech szerokościach; podglądy zapisuje w `app/build/reports/pad-preview/`.
+na różnych rozmiarach w pionie i poziomie; podglądy zapisuje w `app/build/reports/pad-preview/`.
+Test przepływu manualnego sprawdza obrót w obie strony bez nowego `hello` / `stop`
+i bez resetowania numeracji `seq`, a następnie zmianę gracza oraz zamknięcie pada.
 Serwer w testach
 jest wyłącznie atrapą testową, nie nowym backendem aplikacji.
 

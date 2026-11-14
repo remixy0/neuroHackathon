@@ -70,6 +70,8 @@ class MainActivityManualTest {
             activity.findViewById<RadioButton>(R.id.mode_manual).performClick()
             click("Dalej")
             until { all().any { it is RetroPadView } }
+            @Suppress("DEPRECATION")
+            assertTrue(activity.window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN != 0)
             assertFalse(all().filterIsInstance<Button>().any { it.text.toString() == "Szukaj HALO" })
             click("A")
             until { messages.any { it["type"]?.jsonPrimitive?.content == "manual" } }
@@ -125,6 +127,8 @@ class MainActivityManualTest {
             assertEquals(listOf(0, 1, 2, 0), events.map { it.getValue("seq").jsonPrimitive.int })
             click("Zakończ / zmień tryb")
             until { all().filterIsInstance<Button>().any { it.text.toString() == "Dalej" } }
+            @Suppress("DEPRECATION")
+            assertEquals(0, activity.window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN)
             until { messages.count { it["type"]?.jsonPrimitive?.content == "stop" } == 2 }
         } finally { owner.pause().stop().destroy(); server.close() }
     }
