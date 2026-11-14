@@ -1,0 +1,29 @@
+# --- system, edytory, narzędzia
+.DS_Store
+.Rhistory
+.RData
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.claude/
+.superpowers/
+
+# --- dane: nagrania EEG, sesje treningowe, archiwum (zostają tylko lokalnie)
+resources/
+*.db
+*.db-wal
+*.db-shm
+tools/archive/
+tools/training/*
+!tools/training/README.md
+tools/labels/
+
+# --- modele (duże pliki binarne; odtwarza je tools/train_gestures.py z danych)
+*.joblib
+
+# --- buildy i lokalne ustawienia
+macos/build/
+macos/.build/
+backend/settings.json
+node_modules/
