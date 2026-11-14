@@ -93,6 +93,10 @@
   .gap input { width: min(240px, 100%); accent-color: var(--print); }
   .gap output { font-variant-numeric: tabular-nums; min-width: 3.2em; }
   .gap-hint { flex-basis: 100%; font-weight: 400; font-size: 13px; color: var(--print-soft); }
+  .gap .check { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+  .gap .check input { width: 18px; height: 18px; accent-color: var(--print); }
+  .gap input:disabled, .gap output.off { opacity: 0.4; }
+  .gest .thr input:disabled { opacity: 0.35; }
   .bay { background: var(--case-dark); border-radius: 10px; padding: 6px; }
   .bay-row { display: grid; grid-template-columns: minmax(210px, 1.6fr) repeat(4, minmax(78px, 1fr)) 104px; gap: 6px; align-items: stretch; }
   .bay-row + .bay-row { margin-top: 6px; }
@@ -195,6 +199,13 @@
       <output id="gapOut" for="gap"></output>
       <span class="gap-hint">Krócej: szybsze powtórki, np. dwie zmiany pasa. Za krótko: jeden ruch może zadziałać dwa razy.</span>
     </div>
+    <div class="gap">
+      <label class="check"><input type="checkbox" id="gyro"> Ruchy głowy prosto z żyroskopu</label>
+      <label for="gyroDps">od prędkości</label>
+      <input type="range" id="gyroDps" min="20" max="200" step="5">
+      <output id="gyroOut" for="gyroDps"></output>
+      <span class="gap-hint">Głowa reaguje ok. 0,25 s szybciej niż przez model. Niższy próg: wystarczy łagodniejszy ruch, ale przypadkowe ruchy głowy też zadziałają. Powrót głowy do środka nie jest liczony.</span>
+    </div>
     <div class="bay" id="bay"></div>
     <div class="save-state" id="saveState" role="status"></div>
   </section>
@@ -249,7 +260,9 @@ function renderBay() {
     `<div class="${p.id === live ? 'live' : ''}">${p.id === live ? '<span class="led on"></span>' : ''}${esc(p.name)}</div>`).join('')}<div>Wypróbuj</div></div>`;
   const rows = info.gestures.map((g) => {
     const thr = settings.thresholds[g.id];
-    const rel = g.reliability != null ? `trafia u nowej osoby w ${Math.round(g.reliability * 100)}%` : 'brak pomiaru skuteczności';
+    const gyro = settings.head_gyro && g.id.startsWith('head_');
+    const rel = gyro ? 'z żyroskopu, próg pewności nie działa'
+      : g.reliability != null ? `trafia u nowej osoby w ${Math.round(g.reliability * 100)}%` : 'brak pomiaru skuteczności';
     const slots = info.profiles.map((p) => {
       const e = settings.profiles[p.id][g.id];
       return `<button class="slot ${p.id === live ? 'live' : ''}" data-g="${g.id}" data-p="${p.id}"
@@ -259,7 +272,7 @@ function renderBay() {
     return `<div class="bay-row">
       <div class="gest"><span class="led" data-led="${g.id}"></span><span class="name">${esc(g.name)}</span>
         <span class="meta">${rel}</span>
-        <label class="thr">Próg <input type="range" min="0.05" max="0.95" step="0.01" value="${thr}" data-thr="${g.id}" aria-label="Próg pewności: ${esc(g.name)}"><output>${thr.toFixed(2)}</output></label></div>
+        <label class="thr">Próg <input type="range" min="0.05" max="0.95" step="0.01" value="${thr}" data-thr="${g.id}" aria-label="Próg pewności: ${esc(g.name)}" ${gyro ? 'disabled' : ''}><output>${thr.toFixed(2)}</output></label></div>
       ${slots}
       <div class="tests"><button data-test="${g.id}" data-player="1">Gracz 1</button><button data-test="${g.id}" data-player="2">Gracz 2</button></div>
     </div>`;
@@ -465,7 +478,8 @@ function renderLog() {
   const items = (snap.log || []).slice(0, 25);
   $('#log').innerHTML = items.length ? items.map((e) => {
     const t = new Date(e.time * 1000).toLocaleTimeString('pl-PL');
-    const what = e.source === 'manual' ? 'pad' : `${esc(e.gesture_pl)}${e.confidence != null && e.source === 'eeg' ? ` ${Math.round(e.confidence * 100)}%` : ''}${e.source === 'test' ? ' (test)' : ''}`;
+    const how = e.via === 'gyro' ? ' żyroskop' : e.confidence != null && e.source === 'eeg' ? ` ${Math.round(e.confidence * 100)}%` : '';
+    const what = e.source === 'manual' ? 'pad' : `${esc(e.gesture_pl)}${how}${e.source === 'test' ? ' (test)' : ''}`;
     const res = !e.button ? '<span class="dim">nie przypisano</span>'
       : e.sent ? `${esc(GLYPH[e.button])} <span class="dim">${esc(e.profile)}</span>`
       : `<span class="warn">${esc(GLYPH[e.button])} Arcade offline</span>`;
@@ -499,6 +513,17 @@ function connectUi() {
   gap.value = settings.refractory_s;
   showGap();
   gap.addEventListener('input', () => { settings.refractory_s = Number(gap.value); showGap(); save(400); });
+  const gyro = $('#gyro'), dps = $('#gyroDps');
+  const showGyro = () => {
+    $('#gyroOut').textContent = `${dps.value}°/s`;
+    dps.disabled = !gyro.checked;
+    $('#gyroOut').classList.toggle('off', !gyro.checked);
+  };
+  gyro.checked = settings.head_gyro;
+  dps.value = settings.head_gyro_dps;
+  showGyro();
+  gyro.addEventListener('change', () => { settings.head_gyro = gyro.checked; showGyro(); renderBay(); save(); });
+  dps.addEventListener('input', () => { settings.head_gyro_dps = Number(dps.value); showGyro(); save(400); });
   renderBay();
   connectUi();
 })();

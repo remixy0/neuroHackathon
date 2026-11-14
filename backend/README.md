@@ -45,6 +45,16 @@ tego samego kierunku mogą przepaść.
 - **Odstęp**: „Ten sam gest ponownie najwcześniej po” (domyślnie 0,8 s; aplikacja macOS ma 1,5 s). Liczony od chwili,
   gdy pewność gestu spadnie poniżej progu. Na nagraniach 0,8 s nie dało żadnego podwójnego zgłoszenia jednego ruchu.
   Gesty różne od siebie nie mają odstępu.
+- **Ruchy głowy prosto z żyroskopu** (domyślnie włączone, próg 60°/s): gest głowy idzie, gdy prędkość obrotu albo
+  pochylenia przekroczy próg we właściwą stronę, bez czekania na model. Powrót do środka (także z przelotem
+  za środek do 20°) nie jest gestem. Na 10 nagraniach (42 min, 178 ruchów głowy):
+
+  | | opóźnienie od początku ruchu | pominięte | powroty zgłoszone jako gest | przypadkowe ruchy głowy |
+  |---|---|---|---|---|
+  | model | 0,28 s | 0 | 44 | 3,8 / min |
+  | żyroskop 60°/s | 0,02 s | 3 | 5 | 0,3 / min |
+
+  Wyłączony przełącznik = głowa jak dawniej z modelu. Przy włączonym progi pewności głowy w tabeli nie działają.
 - **Co robi gest**: kliknij pole, wybierz przycisk na małym padzie i czas naciśnięcia. Kolumny: Menu (menu główne
   i ustawienia gry), Tetris, Pong, Runner. Obramowana kolumna jest teraz używana. Suwak „Próg” ustawia minimalną
   pewność gestu (wspólną dla gier). Przyciski „Gracz 1 / Gracz 2” wysyłają gest bez opaski.
@@ -104,6 +114,7 @@ Uwaga: nagrania sesji były użyte do treningu, więc rozpoznanie na nich jest l
   na sesję w wątku, ACK każdego pakietu. Luka w numeracji próbek, próbki `is_dummy` albo przeciążenie kolejki
   zaczynają rozpoznawanie od nowa (tło osoby zostaje). Gest z danych starszych niż 1 s jest pomijany.
   Sesja EEG bez próbek przez 3 s jest zamykana.
+- `headgyro.py`: szybkie gesty głowy z żyroskopu (próg prędkości, blokada powrotów, odstęp między gestami).
 - `arcade.py`: połączenie z Arcade jako pad, ponawiane co 1–10 s; stan gry wybiera kolumnę ustawień.
 - `app.py`: FastAPI (`/ws/controller`, `/ws/ui`, `/api/settings`, `/api/test`, `/api/info`, `/`).
 

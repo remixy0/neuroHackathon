@@ -131,3 +131,17 @@ def test_validate_gap_range():
     for bad in (0.1, 5, "1", True):
         with pytest.raises(ValueError):
             S.validate({"refractory_s": bad}, d)
+
+
+def test_gyro_defaults():
+    d = S.default_settings(THR)
+    assert d["head_gyro"] is True and d["head_gyro_dps"] == 60.0
+
+
+def test_validate_gyro():
+    d = S.default_settings(THR)
+    out = S.validate({"head_gyro": False, "head_gyro_dps": 90}, d)
+    assert out["head_gyro"] is False and out["head_gyro_dps"] == 90.0
+    for bad in ({"head_gyro": "yes"}, {"head_gyro_dps": 10}, {"head_gyro_dps": 500}, {"head_gyro_dps": True}):
+        with pytest.raises(ValueError):
+            S.validate(bad, d)

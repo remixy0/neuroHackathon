@@ -27,6 +27,8 @@ THRESHOLD_RANGE = (0.05, 0.99)
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_GAP_S = 0.8          # odstęp między powtórzeniami tego samego gestu (aplikacja macOS: 1,5 s)
 GAP_RANGE = (0.3, 3.0)
+DEFAULT_GYRO_DPS = 60.0      # głowa z żyroskopu: próg prędkości obrotu/pochylenia
+GYRO_RANGE = (20.0, 200.0)
 
 # gest -> (przycisk, ms); brak gestu = wyłączony
 _DEFAULTS: dict[str, dict[str, tuple[str, int]]] = {
@@ -56,8 +58,8 @@ def default_settings(model_thresholds: dict[str, float]) -> dict:
             button, ms = _DEFAULTS[p].get(g, (None, TAP_MS))
             profiles[p][g] = {"button": button, "ms": ms}
     thresholds = {g: round(float(model_thresholds.get(g, DEFAULT_THRESHOLD)), 3) for g in GESTURES}
-    return {"arcade_url": DEFAULT_ARCADE_URL, "refractory_s": DEFAULT_GAP_S, "thresholds": thresholds,
-            "profiles": profiles}
+    return {"arcade_url": DEFAULT_ARCADE_URL, "refractory_s": DEFAULT_GAP_S, "head_gyro": True,
+            "head_gyro_dps": DEFAULT_GYRO_DPS, "thresholds": thresholds, "profiles": profiles}
 
 
 def validate(data: dict, defaults: dict) -> dict:
@@ -77,6 +79,16 @@ def validate(data: dict, defaults: dict) -> dict:
         if isinstance(gap, bool) or not isinstance(gap, (int, float)) or not GAP_RANGE[0] <= gap <= GAP_RANGE[1]:
             raise ValueError(f"odstęp między gestami musi być w zakresie {GAP_RANGE[0]}-{GAP_RANGE[1]} s")
         out["refractory_s"] = round(float(gap), 2)
+
+    if "head_gyro" in data:
+        if not isinstance(data["head_gyro"], bool):
+            raise ValueError("head_gyro musi być true albo false")
+        out["head_gyro"] = data["head_gyro"]
+    if "head_gyro_dps" in data:
+        dps = data["head_gyro_dps"]
+        if isinstance(dps, bool) or not isinstance(dps, (int, float)) or not GYRO_RANGE[0] <= dps <= GYRO_RANGE[1]:
+            raise ValueError(f"próg żyroskopu musi być w zakresie {GYRO_RANGE[0]:.0f}-{GYRO_RANGE[1]:.0f} °/s")
+        out["head_gyro_dps"] = round(float(dps), 1)
 
     thr = data.get("thresholds", {})
     if not isinstance(thr, dict):

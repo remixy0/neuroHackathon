@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from . import protocol as P
+from .headgyro import DEFAULT_DPS, HEAD_GESTURES, HeadGyro
 from .settings import GESTURE_PL, SettingsStore, TAP_MS, profile_for
 
 log = logging.getLogger("halo.sessions")
@@ -80,7 +81,7 @@ class EegPipeline:
     """GestureRecognizer jednej sesji. reset() zaczyna okno od nowa, ale zachowuje tło osoby (normalizację)."""
 
     def __init__(self, names: list[str], fs: float, bundle: dict, thresholds: dict[str, float],
-                 refractory_s: float | None = None):
+                 refractory_s: float | None = None, head_gyro: bool = False, head_gyro_dps: float = DEFAULT_DPS):
         _tools_on_path()
         from gestures.recognizer import REFRACTORY_S, GestureRecognizer
         self._cls = GestureRecognizer
@@ -89,6 +90,10 @@ class EegPipeline:
         self.refractory_s = refractory_s if refractory_s is not None else REFRACTORY_S
         self._pending_thresholds: dict[str, float] | None = None
         self._pending_refractory: float | None = None
+        self._pending_head: tuple[bool, float] | None = None
+        self.ix_gyro = [names.index("Gyro_y"), names.index("Gyro_z")]
+        # głowa z żyroskopu: gesty head_* zgłasza HeadGyro (szybciej), a nie model
+        self.head = HeadGyro(fs, head_gyro_dps, self.refractory_s) if head_gyro else None
         self.resets = 0
         self.gr = self._new()
 
@@ -101,6 +106,8 @@ class EegPipeline:
         history = list(self.gr.history)
         self.gr = self._new()
         self.gr.history.extend(history)
+        if self.head is not None:
+            self.head.reset()
         self.resets += 1
 
     def set_thresholds(self, d: dict[str, float]) -> None:
@@ -111,6 +118,10 @@ class EegPipeline:
         """Odstęp między powtórzeniami tego samego gestu; jak progi - zastosowany przed następnym process()."""
         self._pending_refractory = float(seconds)
 
+    def set_head(self, enabled: bool, threshold_dps: float) -> None:
+        """Włącza/wyłącza głowę z żyroskopu albo zmienia próg; zastosowane przed następnym process()."""
+        self._pending_head = (bool(enabled), float(threshold_dps))
+
     def process(self, chunk: np.ndarray) -> list[dict]:
         pend, self._pending_thresholds = self._pending_thresholds, None
         if pend is not None:
@@ -120,7 +131,24 @@ class EegPipeline:
         if gap is not None:
             self.refractory_s = gap
             self.gr.refractory_s = gap
-        return self.gr.push(chunk)
+            if self.head is not None:
+                self.head.refractory_s = gap
+        head, self._pending_head = self._pending_head, None
+        if head is not None:
+            enabled, dps = head
+            if not enabled:
+                self.head = None
+            elif self.head is None:
+                self.head = HeadGyro(self.fs, dps, self.refractory_s)
+            else:
+                self.head.threshold = dps
+        outs = self.gr.push(chunk)
+        if self.head is not None:
+            for o in outs:
+                if o["event"] in HEAD_GESTURES:
+                    o["event"] = None          # głowę zgłasza żyroskop
+            outs += self.head.push(chunk[self.ix_gyro])
+        return outs
 
     @property
     def warmup_s(self) -> float:
@@ -141,8 +169,9 @@ class EegSession:
         self.hello, self.hub, self.send = hello, hub, send
         self.player = hello.player
         self.names = chunk_names(hello)
-        self.pipeline = EegPipeline(self.names, hello.fs, hub.bundle, hub.settings.data["thresholds"],
-                                    hub.settings.data["refractory_s"])
+        cfg = hub.settings.data
+        self.pipeline = EegPipeline(self.names, hello.fs, hub.bundle, cfg["thresholds"], cfg["refractory_s"],
+                                    head_gyro=cfg["head_gyro"], head_gyro_dps=cfg["head_gyro_dps"])
         self.queue: deque[QueueItem] = deque()
         self.queued_samples = 0
         self._wake = asyncio.Event()
@@ -209,9 +238,10 @@ class EegSession:
     async def _handle(self, outs: list[dict], arrival: float) -> None:
         if not outs:
             return
-        last = outs[-1]
-        self.stats.update(t=last["t"], label=last["label"], confidence=round(float(last["confidence"]), 3),
-                          probs=last["probs"], contact_ok=last["contact_ok"])
+        last = next((o for o in reversed(outs) if "probs" in o), None)   # wynik modelu (nie żyroskopu)
+        if last is not None:
+            self.stats.update(t=last["t"], label=last["label"], confidence=round(float(last["confidence"]), 3),
+                              probs=last["probs"], contact_ok=last["contact_ok"])
         for o in outs:
             gesture = o["event"]
             if not gesture:
@@ -221,7 +251,7 @@ class EegSession:
                 continue
             self.stats["events"] += 1
             entry = await self.hub.dispatch(self.player, gesture, float(o["confidence"]), "eeg",
-                                            session_id=self.hello.session_id)
+                                            session_id=self.hello.session_id, via=o.get("kind", "model"))
             self.stats["last_event"] = entry
             if entry["button"] in P.DIRECTIONS:
                 try:
@@ -272,14 +302,14 @@ class Hub:
         self._n = 0
 
     async def dispatch(self, player: int, gesture: str, confidence: float, source: str,
-                       session_id: str | None = None) -> dict:
+                       session_id: str | None = None, via: str | None = None) -> dict:
         """Gest -> przycisk wg profilu bieżącej gry -> Arcade. Zawsze wpis w logu (też niezmapowany/offline)."""
         profile = profile_for(self.arcade.state)
         action = self.settings.action(profile, gesture)
         self._n += 1
         entry = {"time": time.time(), "player": player, "source": source, "gesture": gesture,
                  "gesture_pl": GESTURE_PL.get(gesture, gesture), "confidence": round(confidence, 2),
-                 "profile": profile, "button": None, "ms": None, "sent": False,
+                 "profile": profile, "button": None, "ms": None, "sent": False, "via": via,
                  "id": f"{source}:{session_id or self.boot}:{self._n}"}
         if action is not None:
             entry["button"], entry["ms"] = action
@@ -303,6 +333,7 @@ class Hub:
             if isinstance(s, EegSession):
                 s.pipeline.set_thresholds(self.settings.data["thresholds"])
                 s.pipeline.set_refractory(self.settings.data["refractory_s"])
+                s.pipeline.set_head(self.settings.data["head_gyro"], self.settings.data["head_gyro_dps"])
 
     def snapshot(self) -> dict:
         state = self.arcade.state or {}

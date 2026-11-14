@@ -1,0 +1,317 @@
+/* ARCADE – obudowa konsoli + czarny ekran. Jednostka --u = jeden piksel ekranu, --cell = jeden klocek Tetrisa (8 px). */
+:root {
+  --case: #c8c4bb;
+  --print: #2b3070;
+  --bezel: #5c5d70;
+  --bezel-text: #b9bacb;
+  --led-off: #3f4050;
+  --led-on: #e2382d;
+
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--case);
+  color: var(--print);
+  font: 15px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+.app {
+  --cell: calc(var(--u) * 8);
+  --scr-bg: #000;
+  --scr-ink: #ececec;
+  --scr-dim: #8c8c8c;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+/* ---------- układ ---------- */
+.stage {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: calc(var(--u) * 6);
+}
+
+/* ---------- obudowa ekranu ---------- */
+.bezel {
+  background: var(--bezel);
+  padding: calc(var(--u) * 2) calc(var(--u) * 6) calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 2) calc(var(--u) * 2) calc(var(--u) * 12) calc(var(--u) * 2);
+}
+.bezel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: calc(var(--u) * 6);
+  margin-bottom: calc(var(--u) * 1.5);
+  color: var(--bezel-text);
+  font-size: max(11px, calc(var(--u) * 3.2));
+  font-style: italic;
+  font-weight: 600;
+}
+.led-wrap { display: flex; align-items: center; gap: calc(var(--u) * 1.5); }
+.led {
+  display: inline-block;
+  width: max(6px, calc(var(--u) * 2));
+  height: max(6px, calc(var(--u) * 2));
+  border-radius: 50%;
+  background: var(--led-off);
+}
+.led.on { background: var(--led-on); }
+
+.lcd {
+  position: relative;
+  background: var(--scr-bg);
+  color: var(--scr-ink);
+  padding: calc(var(--u) * 4);
+}
+.px { display: block; }
+.dim { color: var(--scr-dim); }
+
+/* ---------- ekran gracza ---------- */
+.hud { display: flex; align-items: flex-start; gap: calc(var(--u) * 4); }
+.side {
+  width: calc(var(--cell) * 6);
+  height: calc(var(--cell) * 20);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 5);
+}
+.panel { display: flex; flex-direction: column; gap: calc(var(--u) * 2); }
+.slot {
+  display: grid;
+  place-items: center;
+  height: calc(var(--cell) * 2);
+}
+.slot.big { height: calc(var(--cell) * 3); }
+.panel > .slot.big,
+.next {
+  border: var(--u) solid var(--scr-ink);
+}
+.next { display: flex; flex-direction: column; padding-bottom: calc(var(--u) * 2); }
+.stat { display: flex; flex-direction: column; gap: calc(var(--u) * 1.5); }
+.popups {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 3);
+}
+.popup { display: flex; flex-direction: column; gap: var(--u); }
+.popup.fading { opacity: 0.4; }
+
+/* plansza ma zawsze dokładnie 20 rzędów, pod nią linia podłogi */
+.well {
+  display: flex;
+  height: calc(var(--cell) * 20 + var(--u) * 2);
+  border-bottom: calc(var(--u) * 2) solid var(--scr-dim);
+}
+.wall {
+  position: relative;
+  width: calc(var(--u) * 4);
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--scr-dim) 0 calc(var(--u) * 3),
+    var(--scr-ink) calc(var(--u) * 3) calc(var(--u) * 4)
+  );
+}
+.incoming {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #e5403a;
+}
+
+.field {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(10, var(--cell));
+  grid-template-rows: repeat(20, var(--cell));
+  height: calc(var(--cell) * 20);
+  background-color: var(--scr-bg);
+  background-image:
+    linear-gradient(#1b1b1b 1px, transparent 1px),
+    linear-gradient(90deg, #1b1b1b 1px, transparent 1px);
+  background-size: var(--cell) var(--cell);
+}
+.cell { width: var(--cell); height: var(--cell); }
+.flash {
+  position: absolute;
+  inset: 0;
+  background: var(--scr-ink);
+  opacity: 0.12;
+  pointer-events: none;
+}
+.field-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.field-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+  padding: calc(var(--u) * 3) calc(var(--u) * 4);
+  background: var(--scr-bg);
+  border: var(--u) solid var(--scr-ink);
+}
+
+/* ---------- klocki ---------- */
+.t-I { --c: #1fc8e8; }
+.t-O { --c: #f2cf1d; }
+.t-T { --c: #a64fd6; }
+.t-S { --c: #4cc24a; }
+.t-Z { --c: #e5403a; }
+.t-J { --c: #3a64e0; }
+.t-L { --c: #ef8a26; }
+.t-G { --c: #6b6b6b; }
+.cell[class*='t-'] {
+  background: var(--c);
+  box-shadow:
+    inset var(--u) var(--u) 0 rgba(255, 255, 255, 0.35),
+    inset calc(var(--u) * -1) calc(var(--u) * -1) 0 rgba(0, 0, 0, 0.35);
+}
+.dead { background: #333; }
+.ghost { opacity: 0.25; }
+
+/* podgląd klocka */
+.mini { display: grid; }
+.mini .cell { width: calc(var(--cell) * var(--s)); height: calc(var(--cell) * var(--s)); }
+.mini.dim { opacity: 0.3; }
+
+/* ---------- menu ---------- */
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.menu {
+  width: calc(var(--u) * 192);
+  height: calc(var(--u) * 160);
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--u) * 10) calc(var(--u) * 8) calc(var(--u) * 6);
+  gap: calc(var(--u) * 10);
+}
+.title { display: flex; justify-content: center; }
+.menu-list { list-style: none; display: flex; flex-direction: column; gap: calc(var(--u) * 3); }
+.menu-list li { display: flex; align-items: center; }
+.menu-list .row { display: flex; align-items: center; gap: calc(var(--u) * 3); min-width: calc(var(--u) * 66); }
+.cursor { visibility: hidden; }
+.sel .cursor { visibility: visible; animation: blink 1s steps(2, jump-none) infinite; }
+.val { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+.arrow { visibility: hidden; padding: 0 var(--u); }
+.sel .arrow { visibility: visible; }
+
+/* ekran główny: nazwy gier na środku, większe */
+.menu.centered .menu-list { flex: 1; justify-content: center; gap: calc(var(--u) * 6); margin-top: calc(var(--u) * -4); }
+.menu-list.centered li { justify-content: center; }
+.menu-list.centered .row { position: relative; min-width: 0; }
+.menu-list.centered .cursor { position: absolute; right: 100%; margin-right: calc(var(--u) * 4); }
+.menu-footer { display: flex; justify-content: center; }
+
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---------- pauza i wyniki ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: rgba(200, 196, 187, 0.78);
+}
+.dialog {
+  min-width: calc(var(--u) * 150);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 5);
+  padding: calc(var(--u) * 6);
+}
+.dialog .menu-list { margin-top: calc(var(--u) * 2); }
+.table { display: grid; column-gap: calc(var(--u) * 8); row-gap: calc(var(--u) * 2.5); }
+.table .td { justify-self: end; }
+.table .th { justify-self: start; }
+
+
+/* ---------- Pong ---------- */
+.pong-canvas {
+  display: block;
+  width: calc(var(--u) * 256);
+  height: calc(var(--u) * 192);
+  background: #000;
+}
+
+/* ---------- RUNNER ---------- */
+.runner {
+  position: relative;
+  width: calc(var(--u) * 224);
+  height: calc(var(--u) * 168);
+  overflow: hidden;
+}
+.runner-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+.runner-hud {
+  position: absolute;
+  top: calc(var(--u) * 3);
+  left: calc(var(--u) * 3);
+  right: calc(var(--u) * 3);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  pointer-events: none;
+}
+.hud-box {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 1.5);
+  padding: calc(var(--u) * 2) calc(var(--u) * 3);
+  background: rgba(0, 0, 0, 0.7);
+}
+.hud-box.right { align-items: flex-end; }
+.lives { display: flex; gap: calc(var(--u) * 1.5); margin-top: var(--u); }
+.lives i { width: calc(var(--u) * 4); height: calc(var(--u) * 4); background: #333; }
+.lives i.on { background: #e5403a; }
+.runner-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.runner-popup {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 36%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sel .cursor { animation: none; }
+  .flash { display: none; }
+}

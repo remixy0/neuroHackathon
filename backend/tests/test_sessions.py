@@ -177,6 +177,9 @@ class StubPipeline:
     def set_refractory(self, s):
         pass
 
+    def set_head(self, enabled, dps):
+        pass
+
 
 def run_worker_once(session, timeout=1.0):
     async def main():
@@ -316,3 +319,72 @@ def test_apply_settings_updates_gap(store, bundle):
     assert s.pipeline.gr.refractory_s == 1.2
     s.pipeline.reset()
     assert s.pipeline.gr.refractory_s == 1.2
+
+
+# --- głowa z żyroskopu
+
+def _replay_events(bundle, seconds=60, **kw):
+    cols = load_csv(head_session_csv(), seconds=seconds)
+    hello = eeg_hello()
+    pl, events = None, []
+    for p in csv_packets(cols, n=10):
+        names, arr = SS.packet_chunk(p, hello)
+        pl = pl or SS.EegPipeline(names, 250.0, bundle, bundle.get("thresholds") or {}, 0.8, **kw)
+        events += [o for o in pl.process(arr) if o["event"]]
+    return pl, events
+
+
+@pytest.mark.skipif(head_session_csv() is None, reason="brak nagrań sesji głowy")
+def test_pipeline_gyro_replaces_model_head_events(bundle):
+    _, events = _replay_events(bundle, head_gyro=True, head_gyro_dps=60)
+    heads = [e for e in events if e["event"].startswith("head_")]
+    assert len(heads) >= 3
+    assert all(e.get("kind") == "gyro" for e in heads)
+
+
+@pytest.mark.skipif(head_session_csv() is None, reason="brak nagrań sesji głowy")
+def test_pipeline_gyro_off_uses_model(bundle):
+    _, events = _replay_events(bundle, head_gyro=False)
+    heads = [e for e in events if e["event"].startswith("head_")]
+    assert len(heads) >= 3 and not any(e.get("kind") == "gyro" for e in heads)
+
+
+def test_session_uses_gyro_settings(store, bundle):
+    s = SS.EegSession(eeg_hello(), make_hub(store, bundle), noop_send)
+    assert s.pipeline.head is not None and s.pipeline.head.threshold == 60.0
+
+
+def test_apply_settings_updates_gyro(store, bundle):
+    hub = make_hub(store, bundle)
+    s = SS.EegSession(eeg_hello(), hub, noop_send)
+    hub.sessions[1] = s
+    chunk = SS.packet_chunk(make_packet(0, 0), eeg_hello())[1]
+    store.replace(dict(store.data, head_gyro_dps=90))
+    hub.apply_settings()
+    s.pipeline.process(chunk)
+    assert s.pipeline.head.threshold == 90.0
+    store.replace(dict(store.data, head_gyro=False))
+    hub.apply_settings()
+    s.pipeline.process(chunk)
+    assert s.pipeline.head is None
+
+
+class GyroStubPipeline(StubPipeline):
+    """Wynik modelu (spoczynek) + gest głowy z żyroskopu."""
+
+    def process(self, chunk):
+        return [{"t": 5.0, "label": "rest", "confidence": 0.9, "event": None, "contact_ok": True,
+                 "probs": {"rest": 0.9}},
+                {"t": 5.02, "event": "head_left", "kind": "gyro", "speed": 80.0, "confidence": 1.0}]
+
+
+def test_gyro_event_dispatched_and_stats_from_model(store, bundle):
+    arc = FakeArcadeLink(state={"screen": "game", "game": "runner"})
+    hub = make_hub(store, bundle, arc)
+    s = SS.EegSession(eeg_hello(), hub, noop_send)
+    s.pipeline = GyroStubPipeline()
+    s.accept(make_packet(0, 0), time.monotonic())
+    run_worker_once(s)
+    assert arc.presses and arc.presses[0][:2] == (1, "left")
+    assert hub.log[0]["via"] == "gyro"
+    assert s.stats["label"] == "rest" and s.stats["probs"] == {"rest": 0.9}
