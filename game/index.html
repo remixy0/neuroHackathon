@@ -1,0 +1,27 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HALO RUSH</title></head><body>
+<div class="app"><header class="toolbar"><b class="brand">HALO <span>RUSH</span></b><div class="match"><strong id="clock">01:30</strong><span id="phase">READY TO RUN</span></div><nav><button id="pause" class="quiet" disabled>Pause P</button><button id="restart" class="quiet">↻ <span>New round</span></button><button id="settings" class="quiet" title="WebSocket settings">⚙ <span>Connection</span><i id="connection-dot"></i></button></nav></header><main class="arena"><section class="player blue" aria-label="Player 1"><div class="viewport" id="view0">
+<canvas id="canvas0" aria-label="Player 1 track"></canvas>
+<div class="player-hud"><div class="identity"><span class="badge">1</span><div><b>Blue Comet</b><span id="lives0" class="hearts">♥ ♥ ♥</span></div></div><div class="score"><strong id="score0">0000</strong><span id="coins0">◈ 0</span></div></div>
+<div class="feedback" id="feedback0"></div><div class="eliminated" id="out0" hidden>Run over<span>The other player is still running</span></div>
+<div class="view-footer"><span id="input0">● READY</span><span>A D · W jump · S slide</span></div>
+</div></section><section class="player pink" aria-label="Player 2"><div class="viewport" id="view1">
+<canvas id="canvas1" aria-label="Player 2 track"></canvas>
+<div class="player-hud"><div class="identity"><span class="badge">2</span><div><b>Pink Phantom</b><span id="lives1" class="hearts">♥ ♥ ♥</span></div></div><div class="score"><strong id="score1">0000</strong><span id="coins1">◈ 0</span></div></div>
+<div class="feedback" id="feedback1"></div><div class="eliminated" id="out1" hidden>Run over<span>The other player is still running</span></div>
+<div class="view-footer"><span id="input1">● READY</span><span>← → · ↑ jump · ↓ slide</span></div>
+</div></section></main></div>
+<div id="overlay" class="overlay"><div class="intro"><div class="eyebrow">HALO RUSH · 1 VS 1</div><h2 id="overlay-title">Ready to<br><em>run?</em></h2><p id="overlay-text">Two tracks, one race. Collect coins and dodge obstacles for 90 seconds.</p><div id="instructions" class="instruction-grid"><span><b>↔</b>Switch lanes</span><span><b>↑</b>Jump</span><span><b>↓</b>Slide</span></div><button id="start" class="primary">Let’s go! →</button><small>Player 1: WASD · Player 2: arrow keys</small></div></div>
+        <dialog id="config">
+            <form method="dialog">
+                <button class="close quiet">✕</button>
+                <div class="eyebrow">BRAINACCESS / INPUT</div>
+                <h2>Connect your input</h2>
+                <p>One WebSocket connection delivers commands for both players.</p>
+                <label for="ws-url">Server address</label><input id="ws-url" value="ws://localhost:8765" placeholder="ws://localhost:8765" />
+                <pre>{"player": 1, "direction": "left"}</pre>
+                <p class="hint">player: 1 or 2 · direction: up, down, left, right<br />One message per gesture.</p>
+                <button id="connect" type="button" class="primary">Connect</button><button id="disconnect" type="button" class="quiet">Disconnect</button>
+                <p id="connection">KEYBOARD MODE</p><p id="ws-status" role="status"></p>
+            </form>
+        </dialog>
+<script type="module" src="/src/main.js"></script></body></html>
