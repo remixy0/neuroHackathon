@@ -48,7 +48,7 @@ class Session:
 
 def _rows(f: Path) -> list[dict]:
     out = []
-    with open(f, newline="") as fh:
+    with open(f, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
             for k in INT_FIELDS:
                 if k in r:
@@ -67,14 +67,14 @@ def load_session(d: Path | str, drop_bad: bool = True) -> Session:
         if not (d / name).is_file():
             raise SkipSession(f"brak pliku {name}")
     try:
-        meta = json.loads((d / "session.json").read_text())
+        meta = json.loads((d / "session.json").read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise SkipSession(f"uszkodzony session.json ({e})") from e
     if meta.get("demo"):
         raise SkipSession("nagranie demo (bez czepka)")
     if meta.get("status") == "recording":
         raise SkipSession("sesja niedokonczona (status recording)")
-    with open(d / "eeg.csv") as fh:
+    with open(d / "eeg.csv", encoding="utf-8") as fh:
         head = fh.readline().strip().split(",")
     try:
         a = np.loadtxt(d / "eeg.csv", delimiter=",", skiprows=1, ndmin=2).T

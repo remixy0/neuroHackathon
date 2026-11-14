@@ -31,7 +31,7 @@ def latest_session(kind: str = "head") -> Path | None:
 
 
 def read_csv(path: Path, seconds: float | None) -> tuple[list[list[float]], list[str]]:
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         r = csv.reader(f)
         head = next(r)
         rows = []
@@ -164,7 +164,7 @@ async def stream_manual(url: str, player: int = 1, buttons: list[str] | None = N
                 if stats["error"]:
                     break
         else:
-            print(f"Pad gracza {player}: wpisz left/right/up/down/a/b/x/start/select i Enter (Ctrl+D kończy).")
+            print(f"Pad gracza {player}: wpisz left/right/up/down/a/b/x/start/select i Enter (kończy Ctrl+D, w Windows Ctrl+Z i Enter).")
             loop = asyncio.get_running_loop()
             while True:
                 line = await loop.run_in_executor(None, sys.stdin.readline)

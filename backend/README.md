@@ -21,7 +21,7 @@ Raz (Python 3.13):
 Potem w dwóch terminalach:
 
 ```bash
-cd ~/Downloads/arcade && npm run dev
+cd arcade && npm run dev
 ```
 
 ```bash

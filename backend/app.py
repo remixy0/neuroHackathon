@@ -57,7 +57,7 @@ def lan_ips() -> list[str]:
 def reliability() -> dict[str, float]:
     """Skuteczność gestów u nowej osoby (raport treningu: live_new_person.hit_rate)."""
     try:
-        per = json.loads(REPORT.read_text())["live_new_person"]["per_class"]
+        per = json.loads(REPORT.read_text(encoding="utf-8"))["live_new_person"]["per_class"]
         return {g: round(float(v["hit_rate"]), 3) for g, v in per.items() if "hit_rate" in v}
     except (OSError, ValueError, KeyError, TypeError):
         return {}
