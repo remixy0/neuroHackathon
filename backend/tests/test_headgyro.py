@@ -122,3 +122,58 @@ def test_return_overshoot_ignored():
     # w lewo ok. 30°, powrót z przelotem ok. 15° za środek: na nagraniach to częsty powrót, nie nowy gest
     sig = Signal().still(2).turn(0, +1, 120, 0.4).still(1).turn(0, -1, 180, 0.4).still(1)
     assert labels(run(sig)) == ["head_left"]
+
+
+# --- prędkości skrajne ostatniego kawałka (kalibracja, wyciszanie gestów twarzy)
+
+def test_speed_extremes_of_last_push():
+    hg = HeadGyro(FS, threshold_dps=60)
+    hg.push(Signal(noise=0.0, bias=(3.0, -2.0)).still(2.0).array())
+    assert np.allclose(hg.vmax, 0, atol=0.5) and np.allclose(hg.vmin, 0, atol=0.5)   # tło odjęte
+    hg.push(Signal(noise=0.0, bias=(3.0, -2.0)).turn(0, 1, 100, 0.4).array())
+    assert abs(hg.vmax[0] - 100) < 3 and abs(hg.vmin[0]) < 3
+    assert abs(hg.vmax[1]) < 3 and abs(hg.vmin[1]) < 3
+    hg.push(Signal(noise=0.0, bias=(3.0, -2.0)).turn(1, -1, 80, 0.4).array())
+    assert abs(hg.vmin[1] + 80) < 3 and abs(hg.vmax[0]) < 3                         # tylko ostatni kawałek
+
+
+def test_speed_extremes_zero_during_warmup():
+    hg = HeadGyro(FS, threshold_dps=60)
+    hg.push(np.full((2, 100), 90.0))
+    assert np.all(hg.vmax == 0) and np.all(hg.vmin == 0)
+
+
+# --- powrót po małym, szybkim ruchu (w grze ludzie ruszają głową krótko, poniżej 12°)
+
+def test_small_flick_return_ignored():
+    sig = Signal().still(2).turn(0, +1, 70, 0.2).still(0.5).turn(0, -1, 70, 0.2).still(1)     # ok. 9° i z powrotem
+    assert labels(run(sig, threshold_dps=40)) == ["head_left"]
+
+
+def test_small_nod_return_ignored():
+    sig = Signal().still(2).turn(1, -1, 70, 0.2).still(0.5).turn(1, +1, 70, 0.2).still(1)
+    assert labels(run(sig, threshold_dps=40)) == ["head_down"]
+
+
+def test_return_after_holding_ignored():
+    sig = Signal().still(2).turn(0, -1, 70, 0.2).still(3.0).turn(0, +1, 70, 0.2).still(1)
+    assert labels(run(sig, threshold_dps=40)) == ["head_right"]
+
+
+def test_opposite_flick_after_return_fires():
+    sig = (Signal().still(2).turn(0, +1, 70, 0.2).still(0.5).turn(0, -1, 70, 0.2).still(0.6)
+           .turn(0, -1, 70, 0.2).still(1))
+    assert labels(run(sig, threshold_dps=40)) == ["head_left", "head_right"]
+
+
+def test_same_side_flicks_with_returns():
+    sig = (Signal().still(2).turn(0, +1, 70, 0.2).still(0.4).turn(0, -1, 70, 0.2).still(0.6)
+           .turn(0, +1, 70, 0.2).still(0.4).turn(0, -1, 70, 0.2).still(1))
+    assert labels(run(sig, threshold_dps=40, refractory_s=0.5)) == ["head_left", "head_left"]
+
+
+def test_reset_clears_expected_return():
+    hg = HeadGyro(FS, threshold_dps=40)
+    assert labels(hg.push(Signal().still(2).turn(0, +1, 70, 0.2).still(0.5).array())) == ["head_left"]
+    hg.reset()
+    assert labels(hg.push(Signal(seed=1).still(0.5).turn(0, -1, 70, 0.2).still(1).array())) == ["head_right"]

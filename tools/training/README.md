@@ -12,10 +12,13 @@ Older data (single-trial clips, `samples.jsonl` format) is archived elsewhere an
 | `head` | turns / nods the head after a beep, holds, returns after a second beep | `head_left`, `head_right`, `head_up`, `head_down`, `center` |
 | `frown` | frowns / raises eyebrows after a beep, holds, relaxes after a second beep | `frown`, `relax` |
 | `jaw` | opens the mouth / jaw after a beep, holds, closes after a second beep | `jaw`, `relax` |
+| `keys` | no cues: blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S blink, A left, D right) | `blink`, `look_left`, `look_right` |
 
 Every session starts with a quiet **baseline** (`baseline_start` .. `baseline_end`, label `rest`): the person
 sits still and looks at the centre. Time between trials is also "rest", but the person may blink or
 adjust there. The exact protocol and its parameters are in `session.json` -> `protocol`.
+In mode `keys` there are no stimuli at all: the `key` events are labels given by the person, and time
+between key presses is not reliable rest (unlabelled blinks / eye movements are likely).
 
 ## Files in each session folder
 - `eeg.csv` - one row per sample (fs = 250 Hz). Columns:
@@ -37,8 +40,10 @@ adjust there. The exact protocol and its parameters are in `session.json` -> `pr
   - `expected_response` - mode blink: 1.0 s after each cue, the blink is somewhere inside;
   - `dot_jump` - mode eyes: dot jumped to `x_to` and stays there until `end` (label `look_left`/`look_right`;
     `center` = dot back in the middle);
-  - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`).
-  Spans are stimulus-locked: the body follows 0.2-0.6 s later. Time not covered by any span is
+  - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`);
+  - `key_press` - mode keys: 0.8 s before to 0.5 s after a key press; the labelled movement starts somewhere
+    inside (the person presses the key roughly together with the gesture).
+  Spans of the other modes are stimulus-locked: the body follows 0.2-0.6 s later. Time not covered by any span is
   "between trials" - the person rests but may blink, swallow or adjust.
 - `stimulus.csv` (mode `eyes` only) - `sample`, `t_s`, `dot_x`: horizontal dot position for every EEG
   sample, -1 = left edge, 0 = centre, +1 = right edge of the window (see `protocol.screen` for size in px/mm).
@@ -51,7 +56,9 @@ adjust there. The exact protocol and its parameters are in `session.json` -> `pr
 `unix_time_of_sample_0` is a low percentile of (`arrival_unix - sample/fs`) (the least-delayed packets).
 Remaining uncertainty: Bluetooth latency (~20-60 ms, not measured), screen/audio latency (~10-30 ms) and the
 person's reaction time (~0.2-0.6 s after a `cue`). For precise movement onsets detect them in the signal
-(gyroscope for head, Fp1/Fp2 for eyes and blinks, 30-110 Hz power for muscles), searching after each cue.
+(gyroscope for head, Fp1/Fp2 for eyes and blinks, 30-110 Hz power for muscles), searching after each cue
+(mode `keys`: around each key press, see `key_press`). Key presses use the OS key-down timestamp, so they carry
+no screen/audio latency, only the person's own timing.
 
 ## Loading (Python)
 ```python

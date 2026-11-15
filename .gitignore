@@ -26,4 +26,5 @@ tools/labels/
 macos/build/
 macos/.build/
 backend/settings.json
+backend/recordings/
 node_modules/

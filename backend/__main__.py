@@ -7,7 +7,8 @@ import os
 
 import uvicorn
 
-from .app import DEFAULT_SETTINGS, create_app, lan_ips
+from .app import DEFAULT_SETTINGS, HERE, create_app, lan_ips
+from .voice import Voice
 
 
 def main() -> None:
@@ -15,9 +16,12 @@ def main() -> None:
     ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--settings", default=os.environ.get("HALO_SETTINGS", str(DEFAULT_SETTINGS)))
+    ap.add_argument("--recordings", default=os.environ.get("HALO_RECORDINGS", str(HERE / "recordings")),
+                    help="katalog na zapis sesji EEG (ustawienie 'record' włącza i wyłącza zapis)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S")
-    app = create_app(args.settings, token=os.environ.get("HALO_TOKEN") or None)
+    app = create_app(args.settings, token=os.environ.get("HALO_TOKEN") or None, voice=Voice(),
+                     recordings_dir=args.recordings)
     print(f"\n  Ustawienia:  http://localhost:{args.port}/")
     for ip in lan_ips():
         print(f"  Telefon:     ws://{ip}:{args.port}/ws/controller   (strona: http://{ip}:{args.port}/)")

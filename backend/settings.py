@@ -29,6 +29,12 @@ DEFAULT_GAP_S = 0.8          # odstęp między powtórzeniami tego samego gestu 
 GAP_RANGE = (0.3, 3.0)
 DEFAULT_GYRO_DPS = 60.0      # głowa z żyroskopu: próg prędkości obrotu/pochylenia
 GYRO_RANGE = (20.0, 200.0)
+# gest twarzy/oczu z modelu jest pomijany, gdy w ostatnich MUTE_S sekundach głowa ruszała się szybciej niż MUTE_DPS
+DEFAULT_MUTE_S = 1.5
+MUTE_S_RANGE = (0.0, 5.0)    # 0 = wyłączone
+DEFAULT_MUTE_DPS = 30.0
+MUTE_DPS_RANGE = (10.0, 200.0)
+FLAGS = ("calibration", "voice", "record")   # kalibracja na starcie sesji, polecenia głosem, zapis sesji na dysk
 
 # gest -> (przycisk, ms); brak gestu = wyłączony
 _DEFAULTS: dict[str, dict[str, tuple[str, int]]] = {
@@ -58,8 +64,19 @@ def default_settings(model_thresholds: dict[str, float]) -> dict:
             button, ms = _DEFAULTS[p].get(g, (None, TAP_MS))
             profiles[p][g] = {"button": button, "ms": ms}
     thresholds = {g: round(float(model_thresholds.get(g, DEFAULT_THRESHOLD)), 3) for g in GESTURES}
-    return {"arcade_url": DEFAULT_ARCADE_URL, "refractory_s": DEFAULT_GAP_S, "head_gyro": True,
-            "head_gyro_dps": DEFAULT_GYRO_DPS, "thresholds": thresholds, "profiles": profiles}
+    return {"arcade_url": DEFAULT_ARCADE_URL, "refractory_s": DEFAULT_GAP_S, "head_gyro_dps": DEFAULT_GYRO_DPS,
+            "calibration": True, "voice": True, "record": True,
+            "motion_mute_s": DEFAULT_MUTE_S, "motion_mute_dps": DEFAULT_MUTE_DPS,
+            "thresholds": thresholds, "profiles": profiles}
+
+
+def _number(data: dict, key: str, lo: float, hi: float, what: str, unit: str) -> float | None:
+    if key not in data:
+        return None
+    v = data[key]
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+        raise ValueError(f"{what} musi być w zakresie {lo:g}-{hi:g} {unit}")
+    return float(v)
 
 
 def validate(data: dict, defaults: dict) -> dict:
@@ -80,15 +97,21 @@ def validate(data: dict, defaults: dict) -> dict:
             raise ValueError(f"odstęp między gestami musi być w zakresie {GAP_RANGE[0]}-{GAP_RANGE[1]} s")
         out["refractory_s"] = round(float(gap), 2)
 
-    if "head_gyro" in data:
-        if not isinstance(data["head_gyro"], bool):
-            raise ValueError("head_gyro musi być true albo false")
-        out["head_gyro"] = data["head_gyro"]
-    if "head_gyro_dps" in data:
-        dps = data["head_gyro_dps"]
-        if isinstance(dps, bool) or not isinstance(dps, (int, float)) or not GYRO_RANGE[0] <= dps <= GYRO_RANGE[1]:
-            raise ValueError(f"próg żyroskopu musi być w zakresie {GYRO_RANGE[0]:.0f}-{GYRO_RANGE[1]:.0f} °/s")
-        out["head_gyro_dps"] = round(float(dps), 1)
+    # "head_gyro" (dawny przełącznik) jest pomijane jak każde nieznane pole: głowa zawsze idzie z żyroskopu
+    dps = _number(data, "head_gyro_dps", *GYRO_RANGE, "próg żyroskopu", "°/s")
+    if dps is not None:
+        out["head_gyro_dps"] = round(dps, 1)
+    mute_s = _number(data, "motion_mute_s", *MUTE_S_RANGE, "czas wyciszenia po ruchu głowy", "s")
+    if mute_s is not None:
+        out["motion_mute_s"] = round(mute_s, 2)
+    mute_dps = _number(data, "motion_mute_dps", *MUTE_DPS_RANGE, "prędkość głowy wyciszająca gesty twarzy", "°/s")
+    if mute_dps is not None:
+        out["motion_mute_dps"] = round(mute_dps, 1)
+    for flag in FLAGS:
+        if flag in data:
+            if not isinstance(data[flag], bool):
+                raise ValueError(f"{flag} musi być true albo false")
+            out[flag] = data[flag]
 
     thr = data.get("thresholds", {})
     if not isinstance(thr, dict):

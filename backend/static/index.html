@@ -84,6 +84,12 @@
   .waiting { display: flex; flex-direction: column; gap: 10px; }
   .waiting code { font: 12px var(--px); color: var(--ink); background: #161616; padding: 6px 8px; overflow-wrap: anywhere; }
   .flash { animation: flash 0.9s ease-out; }
+  .cal-btn { background: var(--key); color: var(--ink); border: 0; border-radius: 4px; padding: 3px 9px; font: 600 12px var(--ui); cursor: pointer; }
+  .cal-btn:hover { background: var(--key-hi); }
+  .cal-btn[hidden] { display: none; }
+  .calbar { height: 9px; background: #1d1d1d; margin: 10px 0 6px; }
+  .calbar span { display: block; height: 100%; background: var(--led-on); }
+  .calsum { margin-top: 8px; }
   @keyframes flash { from { background: #3a1210; } to { background: transparent; } }
 
   /* mapowanie */
@@ -186,8 +192,8 @@
   </header>
 
   <section class="players" aria-label="Gracze">
-    <div class="bezel"><div class="bezel-top"><span>Gracz 1</span><span class="led-wrap"><span class="led" id="led1"></span><span id="mode1">brak</span></span></div><div class="screen" id="p1" aria-live="polite"></div></div>
-    <div class="bezel"><div class="bezel-top"><span>Gracz 2</span><span class="led-wrap"><span class="led" id="led2"></span><span id="mode2">brak</span></span></div><div class="screen" id="p2" aria-live="polite"></div></div>
+    <div class="bezel"><div class="bezel-top"><span>Gracz 1</span><span class="led-wrap"><button class="cal-btn" id="cal1" data-cal="1" hidden></button><span class="led" id="led1"></span><span id="mode1">brak</span></span></div><div class="screen" id="p1" aria-live="polite"></div></div>
+    <div class="bezel"><div class="bezel-top"><span>Gracz 2</span><span class="led-wrap"><button class="cal-btn" id="cal2" data-cal="2" hidden></button><span class="led" id="led2"></span><span id="mode2">brak</span></span></div><div class="screen" id="p2" aria-live="polite"></div></div>
   </section>
 
   <section aria-labelledby="mapTitle">
@@ -200,11 +206,25 @@
       <span class="gap-hint">Krócej: szybsze powtórki, np. dwie zmiany pasa. Za krótko: jeden ruch może zadziałać dwa razy.</span>
     </div>
     <div class="gap">
-      <label class="check"><input type="checkbox" id="gyro"> Ruchy głowy prosto z żyroskopu</label>
-      <label for="gyroDps">od prędkości</label>
+      <label for="gyroDps">Ruchy głowy z żyroskopu od prędkości</label>
       <input type="range" id="gyroDps" min="20" max="200" step="5">
       <output id="gyroOut" for="gyroDps"></output>
-      <span class="gap-hint">Głowa reaguje ok. 0,25 s szybciej niż przez model. Niższy próg: wystarczy łagodniejszy ruch, ale przypadkowe ruchy głowy też zadziałają. Powrót głowy do środka nie jest liczony.</span>
+      <span class="gap-hint">Głowa idzie zawsze prosto z żyroskopu, bez modelu. Niższy próg: wystarczy łagodniejszy ruch, ale przypadkowe ruchy głowy też zadziałają. Powrót głowy do środka nie jest liczony. Kalibracja dobiera ten próg osobno dla każdej osoby.</span>
+    </div>
+    <div class="gap">
+      <label for="muteS">Po ruchu głowy bez gestów twarzy przez</label>
+      <input type="range" id="muteS" min="0" max="5" step="0.1">
+      <output id="muteSOut" for="muteS"></output>
+      <label for="muteDps">gdy głowa szybsza niż</label>
+      <input type="range" id="muteDps" min="10" max="200" step="5">
+      <output id="muteDpsOut" for="muteDps"></output>
+      <span class="gap-hint">Ruch głowy przesuwa elektrody i wygląda dla modelu jak szczęka albo czoło. 0 s wyłącza wyciszanie.</span>
+    </div>
+    <div class="gap">
+      <label class="check"><input type="checkbox" id="optCal"> Kalibracja na starcie sesji</label>
+      <label class="check"><input type="checkbox" id="optVoice"> Polecenia głosem z tego komputera</label>
+      <label class="check"><input type="checkbox" id="optRecord"> Zapis sesji na dysk</label>
+      <span class="gap-hint">Kalibracja trwa ok. 45 s: spokój, cztery ruchy głowy, po trzy mrugnięcia, otwarcia ust i zmarszczenia czoła. W tym czasie gesty nie idą do gry, a jej wynik ustawia progi tylko dla tej sesji. Zapis trafia do backend/recordings, ok. 2 MB na minutę na gracza.</span>
     </div>
     <div class="bay" id="bay"></div>
     <div class="save-state" id="saveState" role="status"></div>
@@ -260,7 +280,7 @@ function renderBay() {
     `<div class="${p.id === live ? 'live' : ''}">${p.id === live ? '<span class="led on"></span>' : ''}${esc(p.name)}</div>`).join('')}<div>Wypróbuj</div></div>`;
   const rows = info.gestures.map((g) => {
     const thr = settings.thresholds[g.id];
-    const gyro = settings.head_gyro && g.id.startsWith('head_');
+    const gyro = g.id.startsWith('head_');
     const rel = gyro ? 'z żyroskopu, próg pewności nie działa'
       : g.reliability != null ? `trafia u nowej osoby w ${Math.round(g.reliability * 100)}%` : 'brak pomiaru skuteczności';
     const slots = info.profiles.map((p) => {
@@ -426,9 +446,38 @@ function renderArcade() {
 // ---------------------------------------------------------------- gracze
 const lastEventId = { 1: null, 2: null };
 
+const FACE_SHORT = { blink: 'mrugnięcie', jaw: 'szczęka', frown: 'czoło' };
+const num = (v, digits = 2) => Number(v).toFixed(digits).replace('.', ',');
+
+// przycisk w belce ekranu gracza (belka nie jest przerysowywana 5 razy na sekundę, więc kliknięcie nie ginie)
+function renderCalButton(n, p) {
+  const btn = $(`#cal${n}`);
+  const eeg = p && p.mode === 'eeg';
+  const active = eeg && p.calibration && ['waiting', 'running'].includes(p.calibration.state);
+  const label = !eeg ? '' : active ? 'Pomiń kalibrację' : p.calibration ? 'Kalibruj ponownie' : 'Kalibruj';
+  btn.hidden = !label;
+  if (btn.textContent !== label) btn.textContent = label;
+  btn.dataset.action = active ? 'skip' : 'restart';
+}
+
+function calibrationSummary(p) {
+  const cal = p.calibration;
+  if (!cal) return '';
+  if (cal.state === 'skipped') return '<div class="dim calsum">Kalibracja pominięta, progi z ustawień.</div>';
+  if (cal.state !== 'done' || !cal.result) return '';
+  const r = cal.result;
+  const parts = [r.head_dps != null ? `głowa ${Math.round(r.head_dps)}°/s` : 'głowa: próg z ustawień (za mało ruchów)'];
+  for (const [g, e] of Object.entries(r.gestures)) {
+    parts.push(e.works === true ? `${FACE_SHORT[g]} ${num(e.threshold)}`
+      : e.works === false ? `${FACE_SHORT[g]} wyłączone (nie widać)` : `${FACE_SHORT[g]}: próg z ustawień (brak danych)`);
+  }
+  return `<div class="dim calsum">Kalibracja: ${esc(parts.join(' · '))}</div>`;
+}
+
 function renderPlayer(n) {
   const p = snap.players[String(n)];
   const el = $(`#p${n}`);
+  renderCalButton(n, p);
   $(`#led${n}`).classList.toggle('on', !!p);
   $(`#mode${n}`).textContent = !p ? 'brak' : p.mode === 'eeg' ? 'opaska EEG' : 'pad w telefonie';
   if (!p) {
@@ -448,10 +497,12 @@ function renderPlayer(n) {
   const contact = Object.entries(p.contact).map(([ch, ok]) => `<span class="${ok ? '' : 'bad'}"><i></i>${esc(ch)}</span>`).join('');
   const label = p.warmup ? 'Rozgrzewka' : p.contact_ok ? (names[p.label] || p.label || '…') : 'Brak kontaktu';
   const topClass = p.label;
+  const thresholds = p.thresholds || settings.thresholds;
   const bars = CLASS_ORDER.filter((c) => c in names).map((c) => {
     const v = p.probs?.[c] ?? 0;
-    const thr = settings.thresholds[c];
-    return `<span class="${c === topClass ? '' : 'dim'}">${esc(names[c])}</span>
+    const off = thresholds[c] >= 1;                       // gest wyłączony w tej sesji przez kalibrację
+    const thr = c.startsWith('head_') || off ? null : thresholds[c];   // głowa idzie z żyroskopu, nie z pewności
+    return `<span class="${c === topClass ? '' : 'dim'}">${esc(names[c])}${off ? ' (wył.)' : ''}</span>
       <span class="track ${c === topClass ? 'top' : ''}"><span class="fill" style="width:${Math.round(v * 100)}%"></span>${thr ? `<span class="thr" style="left:${Math.round(thr * 100)}%"></span>` : ''}</span>
       <span class="num ${c === topClass ? '' : 'dim'}">${Math.round(v * 100)}%</span>`;
   }).join('');
@@ -460,11 +511,28 @@ function renderPlayer(n) {
   if (p.dummy_samples) issues.push(`zgubione próbki: ${p.dummy_samples}`);
   if (p.overflows) issues.push(`przeciążenia: ${p.overflows}`);
   if (p.stale_events) issues.push(`spóźnione gesty pominięte: ${p.stale_events}`);
+  if (p.muted) issues.push(`gesty twarzy wyciszone przy ruchu głowy: ${p.muted}`);
+  if (p.recording) issues.push(`zapis: ${p.recording}`);
+  const cal = p.calibration;
+  let main;
+  if (cal && cal.state === 'waiting') {
+    main = `<div class="big">Kalibracja za chwilę</div>
+      <div class="dim">Trwa kalibracja drugiego gracza. Do końca własnej kalibracji gesty nie idą do gry.</div>`;
+  } else if (cal && cal.state === 'running') {
+    main = `<div class="dim">Kalibracja, krok ${cal.step} z ${cal.steps}</div>
+      <div class="big">${esc(cal.title)}</div>
+      <div class="dim">${esc(cal.hint)}</div>
+      <div class="calbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(cal.progress * 100)}"><span style="width:${Math.round(cal.progress * 100)}%"></span></div>
+      <div class="row"><span class="dim">zostało ${Math.ceil(cal.remaining_s)} s</span><span class="dim">gesty nie idą jeszcze do gry</span></div>`;
+  } else {
+    main = `<div class="big">${esc(label)}</div>
+      <div class="dim">${p.warmup ? 'Filtry dochodzą do równowagi, gesty ruszą za chwilę.' : `pewność ${Math.round(p.confidence * 100)}%, czerwona kreska to próg`}</div>`;
+  }
   el.innerHTML = `<div class="row"><span>${esc(p.device || 'HALO')}</span><span>${p.battery != null ? `bateria ${p.battery}%` : ''}</span></div>
-    <div class="row"><span class="contact">${contact}</span><span class="dim">${p.seconds} s</span></div>
-    <div class="big">${esc(label)}</div>
-    <div class="dim">${p.warmup ? 'Filtry dochodzą do równowagi, gesty ruszą za chwilę.' : `pewność ${Math.round(p.confidence * 100)}%, czerwona kreska to próg`}</div>
+    <div class="row"><span class="contact">${contact}</span><span class="dim">${p.seconds} s · głowa od ${Math.round(p.head_dps)}°/s</span></div>
+    ${main}
     <div class="bars">${bars}</div>
+    ${calibrationSummary(p)}
     ${issues.length ? `<div class="dim" style="margin-top:8px">${esc(issues.join(', '))}</div>` : ''}`;
   const ev = (snap.log || []).find((e) => e.player === n && e.source === 'eeg');
   if (ev && ev.id !== lastEventId[n]) {
@@ -472,6 +540,14 @@ function renderPlayer(n) {
     lastEventId[n] = ev.id;
   }
 }
+
+document.querySelectorAll('[data-cal]').forEach((btn) => btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  try {
+    await fetch('/api/calibration', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ player: Number(btn.dataset.cal), action: btn.dataset.action }) });
+  } finally { setTimeout(() => { btn.disabled = false; }, 400); }
+}));
 
 // ---------------------------------------------------------------- log
 function renderLog() {
@@ -513,17 +589,29 @@ function connectUi() {
   gap.value = settings.refractory_s;
   showGap();
   gap.addEventListener('input', () => { settings.refractory_s = Number(gap.value); showGap(); save(400); });
-  const gyro = $('#gyro'), dps = $('#gyroDps');
-  const showGyro = () => {
-    $('#gyroOut').textContent = `${dps.value}°/s`;
-    dps.disabled = !gyro.checked;
-    $('#gyroOut').classList.toggle('off', !gyro.checked);
-  };
-  gyro.checked = settings.head_gyro;
+  const dps = $('#gyroDps');
+  const showGyro = () => { $('#gyroOut').textContent = `${dps.value}°/s`; };
   dps.value = settings.head_gyro_dps;
   showGyro();
-  gyro.addEventListener('change', () => { settings.head_gyro = gyro.checked; showGyro(); renderBay(); save(); });
   dps.addEventListener('input', () => { settings.head_gyro_dps = Number(dps.value); showGyro(); save(400); });
+  const muteS = $('#muteS'), muteDps = $('#muteDps');
+  const showMute = () => {
+    const off = Number(muteS.value) === 0;
+    $('#muteSOut').textContent = off ? 'wyłączone' : `${Number(muteS.value).toFixed(1).replace('.', ',')} s`;
+    $('#muteDpsOut').textContent = `${muteDps.value}°/s`;
+    muteDps.disabled = off;
+    $('#muteDpsOut').classList.toggle('off', off);
+  };
+  muteS.value = settings.motion_mute_s;
+  muteDps.value = settings.motion_mute_dps;
+  showMute();
+  muteS.addEventListener('input', () => { settings.motion_mute_s = Number(muteS.value); showMute(); save(400); });
+  muteDps.addEventListener('input', () => { settings.motion_mute_dps = Number(muteDps.value); showMute(); save(400); });
+  for (const [id, key] of [['#optCal', 'calibration'], ['#optVoice', 'voice'], ['#optRecord', 'record']]) {
+    const box = $(id);
+    box.checked = settings[key];
+    box.addEventListener('change', () => { settings[key] = box.checked; save(); });
+  }
   renderBay();
   connectUi();
 })();

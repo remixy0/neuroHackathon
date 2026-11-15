@@ -284,3 +284,73 @@ def test_ui_socket_snapshot(tmp_path, bundle):
     with TestClient(app) as c, c.websocket_connect("/ws/ui") as ws:
         snap = ws.receive_json()
         assert snap["arcade"]["profile"] == "runner" and set(snap["players"]) == {"1", "2"}
+
+
+# --- kalibracja
+
+def test_api_calibration_skip_and_restart(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c:
+        with c.websocket_connect("/ws/controller") as ws:
+            ws.send_json(hello_eeg())
+            assert ws.receive_json()["type"] == "ready"
+            snap = app.state.hub.snapshot()["players"]["1"]["calibration"]
+            assert snap["state"] == "waiting"                       # domyślnie kalibracja na starcie sesji
+            r = c.post("/api/calibration", json={"player": 1, "action": "skip"})
+            assert r.status_code == 200 and r.json()["state"] == "skipped"
+            r = c.post("/api/calibration", json={"player": 1, "action": "restart"})
+            assert r.status_code == 200 and r.json()["state"] == "waiting"
+
+
+def test_api_calibration_without_session_409(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c:
+        assert c.post("/api/calibration", json={"player": 1, "action": "skip"}).status_code == 409
+        with c.websocket_connect("/ws/controller") as ws:
+            ws.send_json(hello_manual(player=2))
+            assert ws.receive_json()["type"] == "ready"
+            assert c.post("/api/calibration", json={"player": 2, "action": "restart"}).status_code == 409
+
+
+def test_api_calibration_bad_request_400(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c:
+        assert c.post("/api/calibration", json={"player": 1, "action": "dance"}).status_code == 400
+        assert c.post("/api/calibration", json={"player": 3, "action": "skip"}).status_code == 400
+        assert c.post("/api/calibration", json={"player": True, "action": "skip"}).status_code == 400
+
+
+def test_session_closed_on_disconnect_writes_recording(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle, recordings_dir=tmp_path / "rec")
+    with TestClient(app) as c:
+        with c.websocket_connect("/ws/controller") as ws:
+            ws.send_json(hello_eeg())
+            assert ws.receive_json()["type"] == "ready"
+            ws.send_json(samples(0, 0))
+            assert ws.receive_json()["type"] == "ack"
+        t0 = time.time()
+        while app.state.hub.sessions and time.time() - t0 < 2:
+            time.sleep(0.02)
+    dirs = list((tmp_path / "rec").iterdir())
+    assert len(dirs) == 1
+    meta = json.loads((dirs[0] / "session.json").read_text(encoding="utf-8"))
+    assert meta["status"] == "closed" and meta["samples"] == 10
+
+
+def test_default_app_writes_no_recordings_and_has_no_voice(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    assert app.state.hub.recordings_dir is None and app.state.hub.voice is None
+
+
+def test_busy_player_rejection_leaves_no_recording(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle, recordings_dir=tmp_path / "rec")
+    with TestClient(app) as c:
+        with c.websocket_connect("/ws/controller") as ws:
+            ws.send_json(hello_eeg())
+            assert ws.receive_json()["type"] == "ready"
+            ws.send_json(samples(0, 0))
+            assert ws.receive_json()["type"] == "ack"
+            with c.websocket_connect("/ws/controller") as ws2:
+                ws2.send_json(hello_eeg(sid=SID2))
+                assert ws2.receive_json()["code"] == "player_busy"
+    assert len(list((tmp_path / "rec").iterdir())) == 1

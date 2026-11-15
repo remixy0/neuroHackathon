@@ -4,6 +4,7 @@
   /ws/ui           stan na żywo dla strony ustawień
   /api/settings    GET/PUT ustawienia (mapowanie gestów, progi, adres Arcade)
   /api/test        POST {"player":1,"gesture":"jaw"} - wysyła gest bez opaski
+  /api/calibration POST {"player":1,"action":"skip"|"restart"} - pomija albo powtarza kalibrację sesji EEG
   /api/info        opis gestów, profili, przycisków i adresy dla telefonu
   /                strona ustawień
 """
@@ -76,11 +77,14 @@ def _text(msg: dict) -> str:
 
 
 def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle: dict | None = None,
-               eeg_idle_s: float = 3.0, hello_timeout_s: float = 5.0, token: str | None = None) -> FastAPI:
+               eeg_idle_s: float = 3.0, hello_timeout_s: float = 5.0, token: str | None = None,
+               voice=None, recordings_dir: Path | str | None = None) -> FastAPI:
+    """voice: voice.Voice do poleceń kalibracji (None = bez głosu); recordings_dir: dokąd zapisywać sesje EEG
+    (None = bez zapisu). Serwer uruchamiany przez `python -m backend` podaje oba (__main__.py)."""
     bundle = bundle if bundle is not None else load_bundle()
     store = SettingsStore(settings_path, bundle.get("thresholds") or {})
     arcade = arcade if arcade is not None else ArcadeLink(store.data["arcade_url"])
-    hub = Hub(store, arcade, bundle)
+    hub = Hub(store, arcade, bundle, voice=voice, recordings_dir=recordings_dir)
     rel = reliability()
 
     @asynccontextmanager
@@ -178,6 +182,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
         finally:
             if worker is not None:
                 worker.cancel()
+            if isinstance(session, EegSession):
+                session.close()
             if session is not None:
                 hub.registry.release(session.player, session)
                 if hub.sessions.get(session.player) is session:
@@ -216,6 +222,22 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
         if gesture not in GESTURES:
             raise HTTPException(400, f"nieznany gest {gesture!r}")
         return await hub.dispatch(player, gesture, 1.0, "test")
+
+    @app.post("/api/calibration")
+    async def calibration(data: dict = Body(...)):
+        player, action = data.get("player"), data.get("action")
+        if player not in (1, 2) or isinstance(player, bool):
+            raise HTTPException(400, "player musi być 1 albo 2")
+        if action not in ("skip", "restart"):
+            raise HTTPException(400, "action musi być 'skip' albo 'restart'")
+        session = hub.sessions.get(player)
+        if not isinstance(session, EegSession):
+            raise HTTPException(409, f"Gracz {player} nie ma połączonej opaski EEG.")
+        if action == "skip":
+            session.skip_calibration()
+        else:
+            session.recalibrate()
+        return session.cal.snapshot() if session.cal is not None else {"state": "off"}
 
     @app.get("/api/info")
     async def info(request: Request):

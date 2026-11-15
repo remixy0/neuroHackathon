@@ -135,13 +135,40 @@ def test_validate_gap_range():
 
 def test_gyro_defaults():
     d = S.default_settings(THR)
-    assert d["head_gyro"] is True and d["head_gyro_dps"] == 60.0
+    assert d["head_gyro_dps"] == 60.0
 
 
 def test_validate_gyro():
     d = S.default_settings(THR)
+    out = S.validate({"head_gyro_dps": 90}, d)
+    assert out["head_gyro_dps"] == 90.0
+    for bad in ({"head_gyro_dps": 10}, {"head_gyro_dps": 500}, {"head_gyro_dps": True}):
+        with pytest.raises(ValueError):
+            S.validate(bad, d)
+
+
+# --- kalibracja, głos, zapis, wyciszanie przy ruchu głowy
+
+def test_defaults_calibration_fields():
+    d = S.default_settings(THR)
+    assert d["calibration"] is True and d["voice"] is True and d["record"] is True
+    assert d["motion_mute_s"] == 1.5 and d["motion_mute_dps"] == 30.0
+    assert "head_gyro" not in d
+
+
+def test_old_file_with_head_gyro_loads():
+    d = S.default_settings(THR)
     out = S.validate({"head_gyro": False, "head_gyro_dps": 90}, d)
-    assert out["head_gyro"] is False and out["head_gyro_dps"] == 90.0
-    for bad in ({"head_gyro": "yes"}, {"head_gyro_dps": 10}, {"head_gyro_dps": 500}, {"head_gyro_dps": True}):
+    assert "head_gyro" not in out and out["head_gyro_dps"] == 90.0
+
+
+def test_new_fields_validated():
+    d = S.default_settings(THR)
+    out = S.validate({"calibration": False, "voice": False, "record": False, "motion_mute_s": 0,
+                      "motion_mute_dps": 45}, d)
+    assert out["calibration"] is False and out["voice"] is False and out["record"] is False
+    assert out["motion_mute_s"] == 0.0 and out["motion_mute_dps"] == 45.0
+    for bad in ({"calibration": "yes"}, {"voice": 1}, {"record": 1}, {"motion_mute_s": 9}, {"motion_mute_s": True},
+                {"motion_mute_dps": 5}, {"motion_mute_dps": "30"}):
         with pytest.raises(ValueError):
             S.validate(bad, d)

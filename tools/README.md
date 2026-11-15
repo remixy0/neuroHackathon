@@ -7,7 +7,7 @@ Program uczy się na nagraniach ze znacznikami i rozpoznaje, co robi użytkownik
 
 Wszystkie wcześniejsze dane (`training/samples.jsonl` + `raw/`), oba modele (`models/`) i ręczne znaczniki
 nagrań (`labels/`) są w `archive/2026-11-14_przed-startem-od-zera/`. Nowe dane zbiera się wyłącznie w aplikacji
-macOS, w trybach treningu (oczy, mruganie, głowa, czoło, szczęka), i zapisują się jako ciągłe sesje:
+macOS, w trybach treningu (oczy, mruganie, głowa, czoło, szczęka, klawiatura), i zapisują się jako ciągłe sesje:
 
     training/README.md               opis formatu (po angielsku, z przykładem wczytania)
     training/sessions/index.csv      jedna linia na sesję
@@ -216,6 +216,7 @@ jest wyłączone, a nagrywanie sesji działa dalej. Douczania w aplikacji nie ma
 ```bash
 .venv/bin/python train_gestures.py         # wszystkie sesje -> models/gestures.joblib (ok. 30 s)
 .venv/bin/python evaluate_gestures.py      # walidacja + symulacja na żywo (ok. 2 min) -> raport w konsoli
+.venv/bin/python evaluate_gestures.py --bez-trybu keys   # to samo bez sesji trybu klawiatury (porównanie)
 .venv/bin/python -m gestures.selftest      # cechy na żywo == cechy z treningu
 .venv/bin/python -m unittest discover -s tests -t .   # testy na danych syntetycznych
 ```
@@ -238,6 +239,18 @@ działający silnik trzyma stary kod w pamięci.
    prawdopodobieństwa w oknach spoczynku, liczony na osobach spoza treningu).
 6. `gestures/recognizer.py` — strumień: okno co 0,1 s, wygładzanie, próg klasy, bez powtórzeń; ruch
    powrotny głowy rozpoznawany po kącie głowy. `gestures/validation.py` — podziały i symulacja na żywo.
+
+**Sesje trybu klawiatury** (`keys`: osoba sama mruga / patrzy w bok i oznacza gest klawiszem W/S, A, D):
+- początek ruchu szukany jest po obu stronach klawisza (0,8 s przed … 0,5 s po, najdalej do połowy drogi do
+  sąsiedniego klawisza) po prędkości zmiany sygnału Fp; z kilku ruchów wygrywa ten najbliżej klawisza
+  (`onsets.detect_key_onset`). `train_gestures.py` wypisuje dla każdej takiej sesji, przy ilu klawiszach ruch
+  widać i jak daleko od klawisza się zaczyna;
+- okna gestu jak w innych trybach, ale kończą się najpóźniej na początku następnego oznaczonego ruchu;
+- czas między klawiszami to spoczynek o niskiej wadze (`model.GAP_WEIGHT`, rodzaj okna „gap”) — osoba mogła
+  mrugnąć bez klawisza; okna, w których widać mrugnięcie, skok wzroku albo ruch głowy, są pomijane. Okna „gap”
+  nie wchodzą ani do progów zgłoszeń, ani do oceny;
+- `evaluate_gestures.py` liczy mrugnięcia i spojrzenia osobno w sesjach z poleceniami i w sesjach klawiatury,
+  a `--bez-trybu keys` daje wynik bez nagrań z klawiatury — porównanie pokazuje, co te nagrania dały.
 
 **Skuteczność (14.11.2026, 39 sesji, 4 osoby: Maciej, Oliwier, Staś, Urbanek; 10 klas)** — pełny raport:
 `models/gestures_report.json`. Próba = jeden sygnał GO.

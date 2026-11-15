@@ -54,9 +54,19 @@ Start; resztę prowadzi aplikacja głosem i dźwiękami na czarnej planszy na ca
 | **Głowa** | widzi i słyszy kierunek, na piknięcie obraca/pochyla głowę i trzyma 1,5 s, na drugi dźwięk wraca; lewo/prawo/góra/dół po równo w losowej kolejności | `head_left`, `head_right`, `head_up`, `head_down` |
 | **Czoło** | na piknięcie marszczy czoło i trzyma 2 s, na drugi dźwięk rozluźnia | `frown` |
 | **Szczęka** | na piknięcie otwiera szeroko usta i trzyma 1,5 s, na drugi dźwięk zamyka | `jaw` |
+| **Klawiatura** | bez poleceń: sama mruga i patrzy w boki we własnym rytmie, a każdy gest od razu oznacza klawiszem — W lub S = mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo | `blink`, `look_left`, `look_right` |
 
 Każda sesja zaczyna się od instrukcji czytanej na głos i 10 s spokoju (tło). Tryb „Emocje” jest
 osobną zakładką i zapisuje dane po swojemu (opis w `tools/README.md`).
+
+**Tryb klawiatury** nagrywa jedną osobę — tę, która siedzi przy klawiaturze (przy dwóch czepkach
+wybierasz ją obok czasu). Po 10 s spokoju słychać piknięcie i klawisze zaczynają działać; klawisz
+naciska się razem z gestem (tuż przed albo tuż po), gesty co 2–3 s, każdego mniej więcej tyle samo.
+Plansza pokazuje krzyżyk, ostatni zapisany gest i liczniki. Klawisze są fizyczne (jak WASD w grach,
+niezależnie od układu klawiatury), przytrzymanie klawisza liczy się raz. Esc albo „Zakończ” kończy
+sesję normalnie (status `complete`); ustawiony czas to tylko górna granica. W danych każdy klawisz
+to zdarzenie `key` z chwilą wciśnięcia wg systemu oraz odcinek `key_press` (0,8 s przed do 0,5 s po
+klawiszu) w `intervals.csv`.
 
 ### Co się zapisuje
 
@@ -64,9 +74,10 @@ Każda sesja to osobny folder `tools/training/sessions/<data>_<osoba>_<tryb>/`:
 
 - `eeg.csv` — ciągły surowy sygnał wszystkich kanałów czepka (250 Hz), z numerem próbki, czasem
   od początku i czasem zegara komputera;
-- `events.csv` — każdy bodziec i polecenie (piknięcie, zapowiedź, ruch kropki, początek/koniec tła)
-  z numerem próbki, sekundą i czasem unix;
-- `intervals.csv` — to samo jako gotowe odcinki z etykietą (tło, trzymanie ruchu, pozycja kropki);
+- `events.csv` — każdy bodziec i polecenie (piknięcie, zapowiedź, ruch kropki, klawisz, początek/koniec
+  tła) z numerem próbki, sekundą i czasem unix;
+- `intervals.csv` — to samo jako gotowe odcinki z etykietą (tło, trzymanie ruchu, pozycja kropki,
+  okolica klawisza);
 - `stimulus.csv` — tylko w trybie oczu: pozycja kropki dla każdej próbki sygnału;
 - `session.json` — osoba, czepek, opis każdego kanału z jednostką, dokładne parametry protokołu,
   model zegara i jego niepewność, jakość sygnału, liczniki;
