@@ -1,6 +1,8 @@
 package pl.halorush.controller
 
+import android.annotation.SuppressLint
 import android.app.Activity
+import android.bluetooth.BluetoothManager
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -10,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -23,6 +26,7 @@ import com.neurotec.brainaccess.core.DeviceSession
 import com.neurotec.brainaccess.transport.BlePermissions
 import com.neurotec.brainaccess.transport.NordicTransport
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.drop
 import java.net.URI
 
 class MainActivity : Activity() {
@@ -30,7 +34,8 @@ class MainActivity : Activity() {
     private data class DeviceChoice(val name: String, val id: String, val open: suspend () -> DeviceSession)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private lateinit var client: BrainAccessClient
+    private var client: BrainAccessClient? = null
+    private var haloScope: CoroutineScope? = null
     private lateinit var root: LinearLayout
     private var screen = Screen.SERVER
     private var visible = false
@@ -79,7 +84,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        client = BrainAccessClient(NordicTransport(applicationContext))
         val prefs = getSharedPreferences("controller", MODE_PRIVATE)
         serverUrl = savedInstanceState?.getString("endpoint") ?: prefs.getString("endpoint", "").orEmpty()
         playerNumber = (savedInstanceState?.getInt("player") ?: prefs.getInt("player", 1)).coerceIn(1, 2)
@@ -88,21 +92,6 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         }
-        scope.launch {
-            client.bluetoothState.collect { on ->
-                if (!on && !manualMode) {
-                    if (running) endSession(Screen.DEVICE, "Bluetooth jest wyłączony. Włącz go i wybierz HALO ponownie.")
-                    else if (screen == Screen.DEVICE) {
-                        cancelScan()
-                        deviceMessage = "Włącz Bluetooth, aby wyszukać HALO."
-                        show(Screen.DEVICE)
-                    }
-                } else if (screen == Screen.DEVICE && !running && !stopping) {
-                    deviceMessage = "Bluetooth jest włączony. Możesz wyszukać opaskę."
-                    show(Screen.DEVICE)
-                }
-            }
-        }
     }
 
     private fun show(next: Screen) {
@@ -110,9 +99,9 @@ class MainActivity : Activity() {
         endpointField = null; tokenField = null; playerField = null; formError = null
         deviceList = null; deviceStatus = null; searchButton = null
         metrics = null; contact = null; command = null; modeField = null; manualFeedback = null
-        setControllerFullscreen(next == Screen.MANUAL)
         if (next == Screen.MANUAL) {
             manualScreen()
+            setControllerFullscreen(true)
             return
         }
         root = column().apply { setPadding(dp(24), dp(20), dp(24), dp(28)) }
@@ -129,6 +118,8 @@ class MainActivity : Activity() {
             insets
         }
         setContentView(scroll)
+        // PhoneWindow's insets controller requires an existing decor view (Android 11+).
+        setControllerFullscreen(false)
         header(next)
         when (next) {
             Screen.SERVER -> serverScreen()
@@ -269,18 +260,75 @@ class MainActivity : Activity() {
 
     private fun ensurePermissions() {
         if (screen != Screen.DEVICE || stopping || running) return
-        if (!client.bluetoothState.value) {
-            deviceMessage = "Najpierw włącz Bluetooth w ustawieniach telefonu."
-            show(Screen.DEVICE); return
-        }
+        // Even reading the adapter or constructing the SDK must happen after permission.
         val missing = BlePermissions.required.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isEmpty()) scan() else requestPermissions(missing.toTypedArray(), 1)
+        if (missing.isEmpty()) startHaloScan() else requestPermissions(missing.toTypedArray(), 1)
+    }
+
+    @SuppressLint("MissingPermission") // All SDK permissions are checked above, including after a grant.
+    private fun startHaloScan() {
+        try {
+            val adapter = getSystemService(BluetoothManager::class.java)?.adapter
+            if (adapter == null || !packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+                deviceMessage = "Ten telefon nie udostępnia Bluetooth LE wymaganego przez HALO."
+                show(Screen.DEVICE); return
+            }
+            if (!adapter.isEnabled) {
+                deviceMessage = "Najpierw włącz Bluetooth w ustawieniach telefonu."
+                show(Screen.DEVICE); return
+            }
+            if (client == null) initializeHalo()
+            scan()
+        } catch (e: Exception) {
+            haloFailure(e)
+        } catch (e: LinkageError) {
+            haloFailure(e)
+        }
+    }
+
+    private fun initializeHalo() {
+        val job = SupervisorJob()
+        val handler = CoroutineExceptionHandler { _, error ->
+            runOnUiThread {
+                if (haloScope?.coroutineContext?.get(Job) === job) haloFailure(error)
+            }
+        }
+        // Own the SDK's background jobs too; an internal flow failure must not crash the process.
+        val sdkScope = CoroutineScope(job + Dispatchers.Main + handler)
+        haloScope = sdkScope
+        val created = BrainAccessClient(NordicTransport(applicationContext), scope = sdkScope)
+        client = created
+        sdkScope.launch {
+            // The StateFlow's initial value isn't a completed adapter check.
+            created.bluetoothState.drop(1).collect { on ->
+                if (!on && !manualMode) {
+                    if (running) endSession(Screen.DEVICE, "Bluetooth jest wyłączony. Włącz go i wybierz HALO ponownie.")
+                    else if (screen == Screen.DEVICE) {
+                        cancelScan()
+                        deviceMessage = "Włącz Bluetooth, aby wyszukać HALO."
+                        show(Screen.DEVICE)
+                    }
+                } else if (on && screen == Screen.DEVICE && !running && !stopping && !scanning) {
+                    deviceMessage = "Bluetooth jest włączony. Możesz wyszukać opaskę."
+                    show(Screen.DEVICE)
+                }
+            }
+        }
+    }
+
+    private fun haloFailure(error: Throwable) {
+        Log.e("HaloController", "HALO initialization / Bluetooth monitor failed", error)
+        haloScope?.cancel(); haloScope = null; client = null
+        selected = null
+        val message = "Nie udało się uruchomić HALO (${error.javaClass.simpleName}): ${error.message ?: "błąd SDK Bluetooth"}"
+        if (!manualMode && screen != Screen.SERVER) endSession(Screen.DEVICE, message)
+        else deviceMessage = message
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != 1 || !visible || screen != Screen.DEVICE) return
-        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) scan()
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) ensurePermissions()
         else {
             deviceMessage = "Zezwól na dostęp do Bluetooth, aby wyszukać opaskę. Możesz spróbować ponownie."
             show(Screen.DEVICE)
@@ -288,6 +336,7 @@ class MainActivity : Activity() {
     }
 
     private fun scan() {
+        val scanClient = client ?: return
         if (scanning || running || stopping) return
         cancelScan()
         val generation = scanGeneration
@@ -297,12 +346,12 @@ class MainActivity : Activity() {
         scanJob = scope.launch {
             try {
                 withTimeout(15_000) {
-                    client.scan().collect { device ->
+                    scanClient.scan().collect { device ->
                         if (generation == scanGeneration && screen == Screen.DEVICE &&
                             device.model.toString().contains("HALO", ignoreCase = true)) {
                             val key = device.id.toString()
                             if (!choices.containsKey(key)) {
-                                choices[key] = DeviceChoice(device.name, key) { client.connect(device).getOrThrow() }
+                                choices[key] = DeviceChoice(device.name, key) { scanClient.connect(device).getOrThrow() }
                                 renderDevices()
                             }
                         }
@@ -537,6 +586,7 @@ class MainActivity : Activity() {
 
     private fun connect() {
         val device = selected ?: return
+        val sessionClient = client ?: return
         if (running || stopping || runJob?.isCompleted == false) return
         cancelScan()
         running = true
@@ -570,7 +620,7 @@ class MainActivity : Activity() {
             } finally {
                 // A BLE teardown failure must not strand the wizard on the disconnecting screen.
                 withContext(NonCancellable) {
-                    withTimeoutOrNull(5_000) { runCatching { client.disconnectAll() } }
+                    withTimeoutOrNull(5_000) { runCatching { sessionClient.disconnectAll() } }
                 }
                 controller.release()
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -642,7 +692,11 @@ class MainActivity : Activity() {
         outState.putBoolean("manual_mode", manualMode)
         super.onSaveInstanceState(outState)
     }
-    override fun onDestroy() { sessionGeneration++; cancelScan(); scope.cancel(); super.onDestroy() }
+    override fun onDestroy() {
+        sessionGeneration++; cancelScan(); scope.cancel()
+        haloScope?.cancel(); haloScope = null; client = null
+        super.onDestroy()
+    }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }

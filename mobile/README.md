@@ -1,4 +1,8 @@
-# HALO Controller / Android
+# HALO Controller / Android i iOS
+
+**iOS / SwiftUI:** projekt w [ios/](ios/README.md) obsługuje konfigurację serwera,
+pełnoekranowy pad i ten sam kontrakt WebSocket `manual`. Transmisja HALO przez BLE
+nie jest jeszcze dostępna na iOS. Poniższe instrukcje dotyczą Androida.
 
 Natywna aplikacja Kotlin w `controller/`: HALO → BLE → telefon → WebSocket →
 istniejący backend. Model i komendy gry pozostają po stronie backendu.
@@ -25,6 +29,18 @@ i wraca do konfiguracji; paski systemowe można chwilowo wysunąć gestem od kra
 Obrót i zmiana rozmiaru okna przebudowują wyłącznie widok. Zachowane są wybrany
 gracz, połączenie WebSocket, identyfikator sesji i numeracja zdarzeń. Dotyczy to
 również przejścia przez konfigurację w pionie i późniejszego obrotu pada w poziom.
+
+Wersja 0.4.1 naprawia odtworzony w testach błąd startu: odczyt
+`window.insetsController` przed `setContentView` mógł zgłosić
+`NullPointerException` wewnątrz `PhoneWindow`. Paski systemowe są teraz
+konfigurowane dopiero po utworzeniu widoku okna.
+
+Od wersji 0.4.1 ekran konfiguracji i tryb ręczny nie inicjalizują SDK HALO.
+Dopiero „Szukaj HALO” prosi o uprawnienia, sprawdza Bluetooth LE oraz uruchamia
+SDK. Błędy inicjalizacji i monitora Bluetooth są pokazywane na ekranie wyboru
+opaski i logowane pod tagiem `HaloController`; nie powinny zamykać całej aplikacji.
+Jest to poprawka ścieżki startowej, a nie potwierdzenie przyczyny każdej awarii
+na fizycznym telefonie.
 
 Do sprawdzenia połączenia bez właściwego backendu użyj
 [testowego odbiornika](test-server/README.md): `cd mobile/test-server && npm install && npm start`.
@@ -89,6 +105,12 @@ cd mobile/controller
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
+Testy startu obejmują Androida 12, 15 i 16 (Robolectric): brak uprawnień
+przy pierwszym uruchomieniu, kolejność proszenia o uprawnienia i błąd
+inicjalizacji SDK. Dodatkowe testy na Androidzie 15/16 obejmują awarię monitora
+Bluetooth wewnątrz SDK i ponowną próbę bez zamykania aplikacji.
+Testy Androida 16 wymagają JDK 21.
+
 Testy JVM sprawdzają układ i walidację próbek, dokładność liczników, `null` dla
 nieobecnego czujnika oraz rzeczywistą komunikację WebSocket przez MockWebServer:
 hello/ready, samples/ack, manual/ack, komendę, stop, złą sesję i brak ACK. Test pada
@@ -106,3 +128,26 @@ aplikacji. Potwierdź po stronie backendu, że reconnect resetuje stan modelu or
 
 Licencja i informacje SDK: `BrainAccessKit-2.3.1/LICENSE.md` oraz
 `BrainAccessKit-2.3.1/THIRD-PARTY-NOTICES.md`.
+
+## Gdy aplikacja zamyka się od razu po uruchomieniu
+
+Zainstaluj najnowsze `controller/app/build/outputs/apk/debug/app-debug.apk`
+(wersja 0.4.1, versionCode 5). Można zaktualizować poprzednie APK podpisane
+na tym samym komputerze bez odinstalowywania aplikacji.
+
+Jeśli problem nadal występuje, potrzebny jest ślad awarii z telefonu.
+Po podłączeniu telefonu z debugowaniem USB i ponownym wywołaniu błędu:
+
+```sh
+adb logcat -b crash -d -v threadtime
+```
+
+Odszukaj `FATAL EXCEPTION`, `pl.halorush.controller` i następujące po nich
+`Caused by`. Do błędów obsłużonych już wewnątrz aplikacji służy:
+
+```sh
+adb logcat -d -s HaloController AndroidRuntime
+```
+
+Dołącz model telefonu, wersję Androida, wersję aplikacji i informację,
+czy błąd występuje przed wyświetleniem konfiguracji, czy po „Szukaj HALO”.
