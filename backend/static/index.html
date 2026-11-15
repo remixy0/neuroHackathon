@@ -75,6 +75,7 @@
   .contact span { display: inline-flex; align-items: center; gap: 4px; }
   .contact i { width: 7px; height: 7px; background: var(--ink); display: inline-block; }
   .contact .bad i { background: var(--led-on); }
+  .screen .warn { color: #ff8d84; }
   .bars { display: grid; grid-template-columns: 9.5em 1fr 3em; gap: 3px 8px; margin-top: 10px; align-items: center; }
   .bars .track { height: 7px; background: #1d1d1d; position: relative; }
   .bars .fill { position: absolute; inset: 0 auto 0 0; background: var(--dim); }
@@ -118,6 +119,11 @@
   .slot:hover { background: #d3cfc7; }
   .slot.live { box-shadow: inset 0 0 0 2px var(--print); }
   .slot .ms { font-size: 11px; color: var(--print-soft); font-variant-numeric: tabular-nums; }
+  .slot.analog { cursor: default; background: transparent; box-shadow: inset 0 0 0 1px var(--print-soft); }
+  .slot.analog.live { box-shadow: inset 0 0 0 2px var(--print); }
+  .slot.analog .key { font-size: 22px; line-height: 1; }
+  .paddle { position: relative; display: inline-block; width: 120px; height: 10px; border-radius: 5px; background: var(--case); vertical-align: middle; }
+  .paddle i { position: absolute; top: 0; width: 22px; height: 10px; border-radius: 5px; background: var(--print); }
   .slot .ctx { display: none; }
   .tests { display: flex; flex-direction: column; gap: 6px; }
   .tests button { flex: 1; border: 0; border-radius: 6px; background: var(--key); color: #f3f1ec; font: 600 12px var(--ui); cursor: pointer; box-shadow: inset 0 -3px 0 rgba(0,0,0,0.35); padding: 6px 4px; }
@@ -200,16 +206,35 @@
     <h2 class="print" id="mapTitle">Co robi gest</h2>
     <p class="lead">Kliknij pole, żeby wybrać przycisk pada dla danej gry. Obramowana kolumna to gra, która właśnie działa w Arcade. Próg pewności: wyżej mniej fałszywych gestów, niżej szybsza reakcja.</p>
     <div class="gap">
+      <span>Głowa w Pongu</span>
+      <label class="check"><input type="radio" name="pongHead" value="analog" id="pongAnalog"> analogowo — paletka podąża za głową</label>
+      <label class="check"><input type="radio" name="pongHead" value="digital" id="pongDigital"> cyfrowo — ruch głowy = przycisk</label>
+      <label for="analogDeg">paletka przy krawędzi od</label>
+      <input type="range" id="analogDeg" min="8" max="40" step="1">
+      <output id="analogOut" for="analogDeg"></output>
+      <span class="gap-hint">Analogowo: im bardziej pochylisz głowę w górę albo w dół, tym dalej jedzie paletka; głowa prosto = środek. Wygładzanie tłumi drżenie bez opóźniania szybkich ruchów. Mniej stopni: mniejszy ruch głowy wystarczy, ale paletka jest nerwowsza. Kalibracja (w grze albo w aplikacji) dobiera ten zakres osobie. Tetris, Runner i menu są zawsze cyfrowe: jeden przechył = jeden krok (Runner: pas po pasie).</span>
+    </div>
+    <div class="gap">
+      <span>Długie mrugnięcie (A)</span>
+      <span class="gap-hint">Zamknij oczy na ok. pół sekundy: gest idzie w chwili, gdy oczy są zamknięte dość długo, nie po otwarciu. Liczy go reguła na sygnale czoła (Fp1/Fp2), nie model, więc nie ma tu progu pewności. Zwykłe mrugnięcia (0,1–0,3 s), ich szybkie serie i wolne przesunięcia sygnału (spojrzenie w górę/dół, ruch elektrod) gestu nie dają; po szybkim ruchu głowy gest jest wyciszany jak gesty twarzy. Kalibracja („Zamknij oczy na pół sekundy” ×3) ustala kierunek sygnału i próg czasu osoby (0,3–0,7 s); bez kalibracji próg 0,4 s, a kierunek serwer zgaduje na bieżąco.</span>
+    </div>
+    <div class="gap">
       <label for="gap">Ten sam gest ponownie najwcześniej po</label>
       <input type="range" id="gap" min="0.3" max="3" step="0.1">
       <output id="gapOut" for="gap"></output>
-      <span class="gap-hint">Krócej: szybsze powtórki, np. dwie zmiany pasa. Za krótko: jeden ruch może zadziałać dwa razy.</span>
+      <span class="gap-hint">Dotyczy gestów z EEG (mrugnięcia, spojrzenia). Głowa ma własny odstęp 0,25 s: kolejny ruch w tę samą stronę liczy się dopiero po powrocie głowy do środka, więc dwie szybkie zmiany pasa przechodzą.</span>
     </div>
     <div class="gap">
-      <label for="gyroDps">Ruchy głowy z żyroskopu od prędkości</label>
-      <input type="range" id="gyroDps" min="20" max="200" step="5">
-      <output id="gyroOut" for="gyroDps"></output>
-      <span class="gap-hint">Głowa idzie zawsze prosto z żyroskopu, bez modelu. Niższy próg: wystarczy łagodniejszy ruch, ale przypadkowe ruchy głowy też zadziałają. Powrót głowy do środka nie jest liczony. Kalibracja dobiera ten próg osobno dla każdej osoby.</span>
+      <label for="tiltDeg">Ruch głowy od przechyłu / pochylenia</label>
+      <input type="range" id="tiltDeg" min="5" max="40" step="1">
+      <output id="tiltOut" for="tiltDeg"></output>
+      <span class="gap-hint">Głowa idzie z akcelerometru i żyroskopu naraz: żyroskop daje szybki i dokładny kąt, akcelerometr usuwa jego dryf i nie wierzy szarpnięciom. Lewo/prawo = przechył w bok (ucho do ramienia) albo obrót (niżej), góra/dół = pochylenie. Powrót do środka nigdy nie jest gestem. Ten próg działa dla kierunków bez kalibracji; kalibracja w grze albo w aplikacji (ekran „Kalibracja głowy”) ustawia każdy kierunek osobno.</span>
+    </div>
+    <div class="gap">
+      <label class="check"><input type="checkbox" id="turnOn"> Lewo/prawo także obrotem głowy, od</label>
+      <input type="range" id="turnDeg" min="8" max="60" step="1" aria-label="Próg obrotu głowy">
+      <output id="turnOut" for="turnDeg"></output>
+      <span class="gap-hint">Obrót głowy (jak przy patrzeniu w bok) liczy żyroskop. Lewo/prawo idzie z tego, co pierwsze przekroczy próg: przechyłu albo obrotu; jeden ruch to zawsze jeden gest. Przechyły i skinienia dają po drodze do ok. 11° obrotu, obroty w nagraniach mają 37–80°, więc próg 20° ich nie myli. Kalibracja w grze ustawia próg obrotu osobno dla lewo i prawo.</span>
     </div>
     <div class="gap">
       <label for="muteS">Po ruchu głowy bez gestów twarzy przez</label>
@@ -224,7 +249,7 @@
       <label class="check"><input type="checkbox" id="optCal"> Kalibracja na starcie sesji</label>
       <label class="check"><input type="checkbox" id="optVoice"> Polecenia głosem z tego komputera</label>
       <label class="check"><input type="checkbox" id="optRecord"> Zapis sesji na dysk</label>
-      <span class="gap-hint">Kalibracja trwa ok. 45 s: spokój, cztery ruchy głowy, po trzy podwójne mrugnięcia, otwarcia ust i zmarszczenia czoła. W tym czasie gesty nie idą do gry, a jej wynik ustawia progi tylko dla tej sesji. Zapis trafia do backend/recordings, ok. 2 MB na minutę na gracza.</span>
+      <span class="gap-hint">Kalibracja trwa ok. 25 s: spokój, cztery ruchy głowy, dwa obroty i trzy razy „Zamknij oczy na pół sekundy”. W tym czasie gesty nie idą do gry, a jej wynik (głowa, kierunek i próg czasu długiego mrugnięcia) obowiązuje tylko w tej sesji; szczęka i czoło zostają na progach z ustawień. Zapis trafia do backend/recordings, ok. 2 MB na minutę na gracza.</span>
     </div>
     <div class="bay" id="bay"></div>
     <div class="save-state" id="saveState" role="status"></div>
@@ -258,13 +283,15 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const GLYPH = { up: '▲', down: '▼', left: '◀', right: '▶', a: 'A', b: 'B', x: 'X', start: 'START', select: 'SELECT' };
 const BTN_PL = { up: 'w górę', down: 'w dół', left: 'w lewo', right: 'w prawo', a: 'A', b: 'B', x: 'X', start: 'START', select: 'SELECT' };
-const CLASS_ORDER = ['rest', 'head_left', 'head_right', 'head_up', 'head_down', 'jaw', 'frown', 'double_blink', 'look_left', 'look_right'];
+// klasy modelu na paskach pewności (długie mrugnięcie liczy reguła na Fp, nie model)
+const CLASS_ORDER = ['rest', 'head_left', 'head_right', 'head_up', 'head_down', 'jaw', 'frown', 'look_left', 'look_right'];
 const DURATIONS = [120, 300, 600, 1000];
 
 let info = null;          // /api/info
 let settings = null;      // /api/settings
 let snap = null;          // ostatni stan z /ws/ui
-let names = { rest: 'Spoczynek' };
+// klasy modelu, które nie są gestami (mrugnięcie liczy reguła na Fp: long_blink)
+let names = { rest: 'Spoczynek', blink: 'Mrugnięcie (model)', double_blink: 'Podwójne mrugnięcie (model)' };
 
 function keyHtml(button) {
   if (!button) return '<span class="k off" aria-hidden="true">–</span>';
@@ -281,11 +308,17 @@ function renderBay() {
   const rows = info.gestures.map((g) => {
     const thr = settings.thresholds[g.id];
     const gyro = g.id.startsWith('head_');
-    const rel = gyro ? 'z żyroskopu, próg pewności nie działa'
-      : !g.in_model ? 'nie ma jeszcze w modelu: nagraj sesje „Mrugnięcie ×2” i przetrenuj'
+    const fpBlink = g.rule === 'fp';                     // reguła na sygnale czoła, nie model
+    const rel = gyro ? 'z akcelerometru, próg pewności nie działa'
+      : fpBlink ? 'z sygnału czoła (Fp1/Fp2), bez progu pewności'
+      : !g.in_model ? 'nie ma jeszcze w modelu: nagraj sesje i przetrenuj'
       : g.reliability != null ? `trafia u nowej osoby w ${Math.round(g.reliability * 100)}%` : 'brak pomiaru skuteczności';
     const slots = info.profiles.map((p) => {
       const e = settings.profiles[p.id][g.id];
+      if (settings.head_mode?.[p.id] === 'analog' && (g.id === 'head_up' || g.id === 'head_down')) {
+        return `<div class="slot analog ${p.id === live ? 'live' : ''}" data-p="${p.id}" title="Pochylenie głowy przesuwa paletkę płynnie (tryb analogowy)">
+          <span class="ctx">${esc(p.name)}</span><span class="key">↕</span><span class="ms">analogowo</span></div>`;
+      }
       return `<button class="slot ${p.id === live ? 'live' : ''}" data-g="${g.id}" data-p="${p.id}"
         aria-label="${esc(g.name)}, ${p.id === 'menu' ? 'menu' : `gra ${esc(p.name)}`}:${btnLabel(e.button)}${e.button ? `, ${e.ms} ms` : ''}">
         <span class="ctx">${esc(p.name)}</span>${keyHtml(e.button)}<span class="ms">${e.button ? `${e.ms} ms` : 'wyłączony'}</span></button>`;
@@ -293,7 +326,7 @@ function renderBay() {
     return `<div class="bay-row">
       <div class="gest"><span class="led" data-led="${g.id}"></span><span class="name">${esc(g.name)}</span>
         <span class="meta">${rel}</span>
-        <label class="thr">Próg <input type="range" min="0.05" max="0.95" step="0.01" value="${thr}" data-thr="${g.id}" aria-label="Próg pewności: ${esc(g.name)}" ${gyro ? 'disabled' : ''}><output>${thr.toFixed(2)}</output></label></div>
+        ${fpBlink ? '' : `<label class="thr">Próg <input type="range" min="0.05" max="0.95" step="0.01" value="${thr}" data-thr="${g.id}" aria-label="Próg pewności: ${esc(g.name)}" ${gyro ? 'disabled' : ''}><output>${thr.toFixed(2)}</output></label>`}</div>
       ${slots}
       <div class="tests"><button data-test="${g.id}" data-player="1">Gracz 1</button><button data-test="${g.id}" data-player="2">Gracz 2</button></div>
     </div>`;
@@ -348,7 +381,7 @@ $('#bay').addEventListener('input', (ev) => {
 });
 
 $('#bay').addEventListener('click', async (ev) => {
-  const slot = ev.target.closest('.slot');
+  const slot = ev.target.closest('button.slot');      // div.slot.analog: oś analogowa, bez przycisku do wyboru
   if (slot) return openPicker(slot);
   const t = ev.target.closest('[data-test]');
   if (t) {
@@ -447,7 +480,54 @@ function renderArcade() {
 // ---------------------------------------------------------------- gracze
 const lastEventId = { 1: null, 2: null };
 
-const FACE_SHORT = { double_blink: 'podwójne mrugnięcie', jaw: 'szczęka', frown: 'czoło' };
+const HEAD_SHORT = { head_left: '←', head_right: '→', head_up: '↑', head_down: '↓' };
+const SOURCE_PL = { game: 'z kalibracji', app: 'z aplikacji' };
+// progi głowy tej sesji, np. "← 12° → 11° ↑ 15° ↓ 15° (z kalibracji)"
+function headText(p) {
+  const deg = p.head_deg || {};
+  const s = Object.entries(HEAD_SHORT).map(([d, a]) => `${a} ${Math.round(deg[d] ?? settings.head_tilt_deg)}°`).join(' ');
+  const t = p.turn_on && p.turn_deg ? ` · obrót ← ${Math.round(p.turn_deg.head_left)}° → ${Math.round(p.turn_deg.head_right)}°` : '';
+  return (p.tilt_source ? `${s} (${SOURCE_PL[p.tilt_source]})` : s) + t;
+}
+// bieżące położenie głowy względem środka: kierunek, w którym jest najdalej
+function liveHead(p) {
+  const a = p.head_angles || {};
+  const [d, v] = Object.entries(a).sort((x, y) => y[1] - x[1])[0] || [];
+  return d && v >= 2 ? `${HEAD_SHORT[d]} ${Math.round(v)}°` : 'środek';
+}
+// tryb analogowy (Pong): pozycja paletki wysłana do Arcade, 0 = góra (pasek poziomy: lewo = góra)
+function paddleRow(p) {
+  const a = p.analog;
+  if (!a?.active) return '';
+  const r = a.range_deg || {};
+  const range = `pełne wychylenie ↑ ${Math.round(r.head_up ?? settings.analog_range_deg)}° ↓ ${Math.round(r.head_down ?? settings.analog_range_deg)}°`;
+  if (a.pos == null) return `<div class="row"><span class="dim">paletka (analogowo)</span><span class="dim">czeka na głowę · ${range}</span></div>`;
+  return `<div class="row"><span class="dim">paletka (analogowo)</span><span class="dim">góra <span class="paddle" aria-label="paletka ${Math.round(a.pos * 100)}% od góry"><i style="left:${(a.pos * 98).toFixed(1)}px"></i></span> dół · ${range}</span></div>`;
+}
+// sieć telefon -> serwer: opóźnienie (teraz, p95 z ~10 s, max), brakujące próbki (luki w numeracji), z tego zgubione
+// na Bluetoothie (licznik telefonu), odrzucone przez telefon jako stare, przerwy w dostawie > 0,3 s
+// detektor długiego mrugnięcia z Fp: kierunek (z kalibracji albo zgadywany), typowe mrugnięcie, szum, próg czasu
+function blinkRow(p) {
+  const b = p.blink;
+  if (!b) return '';
+  const dir = b.polarity == null ? 'kierunek jeszcze nieznany' : `kierunek ${b.polarity > 0 ? '+' : '−'} ${b.fixed ? '(kalibracja)' : '(na bieżąco)'}`;
+  const amp = b.amplitude_uv != null ? ` · mrugnięcie ~${Math.round(b.amplitude_uv)} µV, szum ${num(b.noise_uv, 1)} µV` : '';
+  const len = b.min_s != null ? ` · długie od ${num(b.min_s)} s` : '';
+  return `<div class="row"><span class="dim">mrugnięcie</span><span class="dim" style="text-align:right">${esc(dir + amp + len)}</span></div>`;
+}
+function netRow(p) {
+  const missing = p.missing_samples || 0;
+  const total = Math.round(p.seconds * 250) + missing;
+  const pct = total ? 100 * missing / total : 0;
+  const parts = [`opóźnienie ${num(p.late_s ?? 0)} s (p95 ${num(p.late_p95_s ?? 0)}, max ${num(p.late_max_s ?? 0)})`,
+    `brak ${missing} próbek (${num(pct, 1)}%)${p.gaps ? ` w ${p.gaps} lukach` : ''}`];
+  if (p.ble_missed != null) parts.push(`Bluetooth zgubił ${p.ble_missed}`);
+  if (p.phone_discarded) parts.push(`telefon odrzucił ${p.phone_discarded}`);
+  if (p.stalls) parts.push(`przerwy ${p.stalls}`);
+  const bad = (p.late_p95_s ?? 0) > 0.3 || pct > 5;
+  return `<div class="row"><span class="dim">sieć</span><span class="${bad ? 'warn' : 'dim'}" style="text-align:right">${esc(parts.join(' · '))}</span></div>`;
+}
+const FACE_SHORT = { long_blink: 'długie mrugnięcie', jaw: 'szczęka', frown: 'czoło' };
 const num = (v, digits = 2) => Number(v).toFixed(digits).replace('.', ',');
 
 // przycisk w belce ekranu gracza (belka nie jest przerysowywana 5 razy na sekundę, więc kliknięcie nie ginie)
@@ -467,8 +547,15 @@ function calibrationSummary(p) {
   if (cal.state === 'skipped') return '<div class="dim calsum">Kalibracja pominięta, progi z ustawień.</div>';
   if (cal.state !== 'done' || !cal.result) return '';
   const r = cal.result;
-  const parts = [r.head_dps != null ? `głowa ${Math.round(r.head_dps)}°/s` : 'głowa: próg z ustawień (za mało ruchów)'];
+  const dirs = r.head?.directions || {};
+  const measured = Object.entries(HEAD_SHORT).filter(([d]) => dirs[d]?.threshold_deg != null)
+    .map(([d, s]) => `${s} ${Math.round(dirs[d].threshold_deg)}°`);
+  const parts = [measured.length ? `głowa ${measured.join(' ')}` : 'głowa: próg z ustawień (za mały ruch)'];
   for (const [g, e] of Object.entries(r.gestures)) {
+    if (e.source === 'fp') {
+      parts.push(`${FACE_SHORT[g]} z czoła, kierunek ${e.polarity == null ? 'zgadywany na bieżąco' : e.polarity > 0 ? '+' : '−'}, wykryte ${e.hits}/${e.trials}${e.min_s != null ? `, od ${num(e.min_s)} s` : ''}`);
+      continue;
+    }
     parts.push(e.works === true ? `${FACE_SHORT[g]} ${num(e.threshold)}`
       : e.works === false ? `${FACE_SHORT[g]} wyłączone (nie widać)` : `${FACE_SHORT[g]}: próg z ustawień (brak danych)`);
   }
@@ -502,13 +589,12 @@ function renderPlayer(n) {
   const bars = CLASS_ORDER.filter((c) => c in names).map((c) => {
     const v = p.probs?.[c] ?? 0;
     const off = thresholds[c] >= 1;                       // gest wyłączony w tej sesji przez kalibrację
-    const thr = c.startsWith('head_') || off ? null : thresholds[c];   // głowa idzie z żyroskopu, nie z pewności
+    const thr = c.startsWith('head_') || off ? null : thresholds[c];   // głowa idzie z akcelerometru, nie z pewności
     return `<span class="${c === topClass ? '' : 'dim'}">${esc(names[c])}${off ? ' (wył.)' : ''}</span>
       <span class="track ${c === topClass ? 'top' : ''}"><span class="fill" style="width:${Math.round(v * 100)}%"></span>${thr ? `<span class="thr" style="left:${Math.round(thr * 100)}%"></span>` : ''}</span>
       <span class="num ${c === topClass ? '' : 'dim'}">${Math.round(v * 100)}%</span>`;
   }).join('');
   const issues = [];
-  if (p.gaps) issues.push(`luki: ${p.gaps}`);
   if (p.dummy_samples) issues.push(`zgubione próbki: ${p.dummy_samples}`);
   if (p.overflows) issues.push(`przeciążenia: ${p.overflows}`);
   if (p.stale_events) issues.push(`spóźnione gesty pominięte: ${p.stale_events}`);
@@ -530,7 +616,11 @@ function renderPlayer(n) {
       <div class="dim">${p.warmup ? 'Filtry dochodzą do równowagi, gesty ruszą za chwilę.' : `pewność ${Math.round(p.confidence * 100)}%, czerwona kreska to próg`}</div>`;
   }
   el.innerHTML = `<div class="row"><span>${esc(p.device || 'HALO')}</span><span>${p.battery != null ? `bateria ${p.battery}%` : ''}</span></div>
-    <div class="row"><span class="contact">${contact}</span><span class="dim">${p.seconds} s · głowa od ${Math.round(p.head_dps)}°/s</span></div>
+    <div class="row"><span class="contact">${contact}</span><span class="dim">${p.seconds} s · głowa od ${headText(p)}</span></div>
+    <div class="row"><span class="dim">głowa teraz</span><span class="dim">${liveHead(p)}</span></div>
+    ${paddleRow(p)}
+    ${netRow(p)}
+    ${blinkRow(p)}
     ${main}
     <div class="bars">${bars}</div>
     ${calibrationSummary(p)}
@@ -555,7 +645,7 @@ function renderLog() {
   const items = (snap.log || []).slice(0, 25);
   $('#log').innerHTML = items.length ? items.map((e) => {
     const t = new Date(e.time * 1000).toLocaleTimeString('pl-PL');
-    const how = e.via === 'gyro' ? ' żyroskop' : e.confidence != null && e.source === 'eeg' ? ` ${Math.round(e.confidence * 100)}%` : '';
+    const how = e.via === 'tilt' ? ' głowa' : e.confidence != null && e.source === 'eeg' ? ` ${Math.round(e.confidence * 100)}%` : '';
     const what = e.source === 'manual' ? 'pad' : `${esc(e.gesture_pl)}${how}${e.source === 'test' ? ' (test)' : ''}`;
     const res = !e.button ? '<span class="dim">nie przypisano</span>'
       : e.sent ? `${esc(GLYPH[e.button])} <span class="dim">${esc(e.profile)}</span>`
@@ -590,11 +680,22 @@ function connectUi() {
   gap.value = settings.refractory_s;
   showGap();
   gap.addEventListener('input', () => { settings.refractory_s = Number(gap.value); showGap(); save(400); });
-  const dps = $('#gyroDps');
-  const showGyro = () => { $('#gyroOut').textContent = `${dps.value}°/s`; };
-  dps.value = settings.head_gyro_dps;
-  showGyro();
-  dps.addEventListener('input', () => { settings.head_gyro_dps = Number(dps.value); showGyro(); save(400); });
+  const tilt = $('#tiltDeg');
+  const showTilt = () => { $('#tiltOut').textContent = `${tilt.value}°`; };
+  tilt.value = settings.head_tilt_deg;
+  showTilt();
+  tilt.addEventListener('input', () => { settings.head_tilt_deg = Number(tilt.value); showTilt(); save(400); });
+  const turnOn = $('#turnOn'), turnDeg = $('#turnDeg');
+  const showTurn = () => {
+    $('#turnOut').textContent = `${turnDeg.value}°`;
+    turnDeg.disabled = !turnOn.checked;
+    $('#turnOut').classList.toggle('off', !turnOn.checked);
+  };
+  turnOn.checked = settings.head_turn !== false;
+  turnDeg.value = settings.head_turn_deg ?? 20;
+  showTurn();
+  turnOn.addEventListener('change', () => { settings.head_turn = turnOn.checked; showTurn(); save(); });
+  turnDeg.addEventListener('input', () => { settings.head_turn_deg = Number(turnDeg.value); showTurn(); save(400); });
   const muteS = $('#muteS'), muteDps = $('#muteDps');
   const showMute = () => {
     const off = Number(muteS.value) === 0;
@@ -608,6 +709,26 @@ function connectUi() {
   showMute();
   muteS.addEventListener('input', () => { settings.motion_mute_s = Number(muteS.value); showMute(); save(400); });
   muteDps.addEventListener('input', () => { settings.motion_mute_dps = Number(muteDps.value); showMute(); save(400); });
+  const analogDeg = $('#analogDeg');
+  const showAnalog = () => {
+    const on = settings.head_mode?.pong === 'analog';
+    $('#pongAnalog').checked = on;
+    $('#pongDigital').checked = !on;
+    $('#analogOut').textContent = `${analogDeg.value}°`;
+    analogDeg.disabled = !on;
+    $('#analogOut').classList.toggle('off', !on);
+  };
+  analogDeg.value = settings.analog_range_deg;
+  showAnalog();
+  analogDeg.addEventListener('input', () => { settings.analog_range_deg = Number(analogDeg.value); showAnalog(); save(400); });
+  for (const radio of document.querySelectorAll('input[name="pongHead"]')) {
+    radio.addEventListener('change', () => {
+      settings.head_mode = { ...settings.head_mode, pong: radio.value };
+      showAnalog();
+      renderBay();
+      save();
+    });
+  }
   for (const [id, key] of [['#optCal', 'calibration'], ['#optVoice', 'voice'], ['#optRecord', 'record']]) {
     const box = $(id);
     box.checked = settings[key];

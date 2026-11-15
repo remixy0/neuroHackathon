@@ -53,6 +53,9 @@ class Packet:
     dummy: np.ndarray      # (N,), bool
     contact: list[bool]    # C
     battery: float | None
+    host_time_ns: int | None = None   # zegar telefonu (monotoniczny) w chwili odbioru z HALO
+    phone_discarded: int | None = None  # próbki odrzucone przez telefon jako stare (w tej sesji WebSocket)
+    ble_missed: int | None = None       # narastający licznik próbek zgubionych na Bluetoothie (może przetrwać reconnect)
 
 
 @dataclass
@@ -75,6 +78,13 @@ def _int_str(msg: dict, key: str, required: bool = True) -> int | None:
     if not isinstance(v, str) or not _INT_STR.fullmatch(v):
         raise _bad(f"'{key}' musi być liczbą całkowitą zapisaną jako string")
     return int(v)
+
+
+def _counter(msg: dict, key: str) -> int | None:
+    """Licznik diagnostyczny telefonu (liczba jako string). Brak albo zły zapis = None, bez błędu:
+    diagnostyka nie może zerwać gry."""
+    v = msg.get(key)
+    return int(v) if isinstance(v, str) and _INT_STR.fullmatch(v) else None
 
 
 def _numbers(msg: dict, key: str, count: int) -> np.ndarray:
@@ -174,7 +184,7 @@ def parse_samples(msg: dict, hello: Hello, expected_seq: int) -> Packet:
     c = len(hello.channels)
     first = _int_str(msg, "first_sample_index")
     _int_str(msg, "wire_last_sample_index", required=False)
-    _int_str(msg, "host_time_ns")
+    host_time_ns = _int_str(msg, "host_time_ns")
     eeg = _numbers(msg, "eeg", n * c).reshape(n, c)
     accel = _numbers(msg, "accel", n * 3).reshape(n, 3)
     gyro = _numbers(msg, "gyro", n * 3).reshape(n, 3)
@@ -185,7 +195,8 @@ def parse_samples(msg: dict, hello: Hello, expected_seq: int) -> Packet:
         if isinstance(battery, bool) or not isinstance(battery, (int, float)) or not 0 <= battery <= 100:
             raise _bad("battery_pct musi być liczbą 0-100 albo null")
         battery = float(battery)
-    return Packet(seq, n, first, eeg, accel, gyro, dummy, contact, battery)
+    return Packet(seq, n, first, eeg, accel, gyro, dummy, contact, battery, host_time_ns,
+                  _counter(msg, "phone_discarded_samples"), _counter(msg, "ble_missed_samples"))
 
 
 def parse_manual(msg: dict, hello: Hello, expected_seq: int) -> Press:

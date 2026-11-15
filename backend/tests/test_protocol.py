@@ -139,6 +139,7 @@ def test_samples_ok():
     assert p.dummy.tolist() == [False, False]
     assert p.contact == [True, True, True, True]
     assert p.battery == 87.0
+    assert p.host_time_ns == 5261234567890123
 
 
 def test_samples_battery_null():
@@ -201,6 +202,23 @@ def test_samples_dummy_flags():
     h = P.parse_hello(hello_eeg())
     p = P.parse_samples(samples(is_dummy=[False, True]), h, 0)
     assert p.dummy.dtype == bool and p.dummy.tolist() == [False, True]
+
+
+def test_samples_phone_loss_counters():
+    h = P.parse_hello(hello_eeg())
+    p = P.parse_samples(samples(phone_discarded_samples="15", ble_missed_samples="230"), h, 0)
+    assert p.phone_discarded == 15 and p.ble_missed == 230
+
+
+def test_samples_loss_counters_optional_and_lenient():
+    """Liczniki to diagnostyka: brak albo zły zapis nie może zerwać gry."""
+    h = P.parse_hello(hello_eeg())
+    msg = samples()
+    del msg["phone_discarded_samples"], msg["ble_missed_samples"]
+    p = P.parse_samples(msg, h, 0)
+    assert p.phone_discarded is None and p.ble_missed is None
+    p = P.parse_samples(samples(phone_discarded_samples=7, ble_missed_samples="x"), h, 0)
+    assert p.phone_discarded is None and p.ble_missed is None
 
 
 # --- manual

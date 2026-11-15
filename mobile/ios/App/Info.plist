@@ -9,7 +9,7 @@
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSRequiresIPhoneOS</key><true/>
-<key>NSLocalNetworkUsageDescription</key><string>Połączenie z serwerem gry w sieci lokalnej i wysyłanie przycisków kontrolera.</string>
+<key>NSLocalNetworkUsageDescription</key><string>Connects to the game server on the local network and sends the controller buttons.</string>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
 <key>UILaunchScreen</key><dict/>

@@ -1,12 +1,18 @@
-"""Kalibracja na starcie sesji EEG: próg żyroskopu i progi gestów twarzy dopasowane do osoby.
+"""Kalibracja na starcie sesji EEG: ruchy głowy (akcelerometr i żyroskop) i progi gestów twarzy dopasowane do osoby.
 
-Osoba wykonuje po kolei (ok. 45 s, polecenia głosem i na stronie):
-  1. spokój 8 s            - tło żyroskopu i EEG osoby,
-  2. głowa: lewo, prawo, góra, dół po 3 s
-                           - próg żyroskopu = 0,4 x mediana szczytowych prędkości, w granicach 25-120°/s;
-                             mniej niż 3 wyraźne ruchy -> zostaje próg z ustawień,
-  3. twarz: podwójne mrugnięcie, szczęka, czoło po 3 razy na przemian, po 2,5 s
-                           - dla gestu g: tło = kwantyl 0,95 pewności g w spokoju i w krokach innych gestów twarzy,
+Osoba wykonuje po kolei (24,5 s, polecenia głosem i na stronie):
+  1. spokój 5 s            - środek głowy (kierunek grawitacji) i tło EEG osoby,
+  2. głowa: przechył w lewo, w prawo (ucho do ramienia), w górę, w dół po 2 s
+                           - dla każdego kierunku: największe wychylenie, kierunek ruchu i próg = 0,45 x zakres osoby
+                             w granicach 6-25° (gestures.tilt.TiltCalibrator); ruch < 8° albo w złą stronę -> zostaje
+                             próg z ustawień,
+     obrót w lewo, w prawo po 2 s
+                           - próg obrotu = 0,45 x największy obrót w tę stronę w granicach 12-40° (żyroskop, wokół
+                             pionu); obrót < 10° -> zostaje próg z ustawień,
+  3. twarz: 3 x "Zamknij oczy na pół sekundy" po 2,5 s
+                           - długie mrugnięcie liczy reguła na Fp (backend/blinks.py): sesja podaje okna tych kroków
+                             detektorowi, który ustala z nich kierunek sygnału i próg czasu osoby,
+                           - gesty modelu z FACE (dziś żaden: szczęka i czoło zostają na progach z ustawień): tło = kwantyl 0,95 pewności g w spokoju i w krokach innych gestów twarzy,
                              szczyt = mediana maksimów w krokach g, próg = tło + 0,4 x (szczyt - tło) w granicach
                              0,15-0,95. Gest działa, gdy szczyt > tło + 0,08 i co najmniej 2 próby przekraczają
                              próg; gest, który nie działa, jest wyłączony do końca sesji.
@@ -20,42 +26,56 @@ trwa dokładnie tyle sygnału, ile zapisano w krokach (luka w danych jej nie skr
     cal = Calibration(fs)
     step = cal.start()                              # pierwszy krok (step.say - polecenie głosem)
     for kawałek:
-        for step in cal.feed(n, vmax, vmin, outs):  # kroki rozpoczęte w tym kawałku
+        for step in cal.feed(n, motion, outs):      # kroki rozpoczęte w tym kawałku; motion["g"] = grawitacja,
+            ...                                     # motion["yaw"] = obrót głowy od środka [°], + = w lewo
             ...
     cal.state == "done" -> cal.result, cal.thresholds()
 """
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
-FACE = ("double_blink", "jaw", "frown")
-HEAD_AXIS = {"head_left": (0, 1), "head_right": (0, -1), "head_up": (1, 1), "head_down": (1, -1)}  # (oś, znak)
-REST_S = 8.0
-HEAD_S = 3.0
+_TOOLS = Path(__file__).resolve().parent.parent / "tools"
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from gestures.tilt import DIRECTIONS, TiltCalibrator  # noqa: E402  (ten sam kod co w aplikacji)
+
+# kroki twarzy; long_blink nie jest klasą modelu, więc progu modelu nie dostaje (works None), a jego wpis w wyniku
+# uzupełnia sesja z detektora Fp. Szczęka i czoło bez kroków (15.11.2026: krótsza kalibracja, w grach bez przycisków).
+FACE = ("long_blink",)
+REST_S = 5.0
+HEAD_S = 2.0
 FACE_S = 2.5
 FACE_REPEATS = 3
-PEAK_FRACTION = 0.4            # próg = tło + tyle drogi do szczytu (głowa: tyle szczytowej prędkości)
-GYRO_LIMITS = (25.0, 120.0)    # °/s
+PEAK_FRACTION = 0.4            # próg = tło + tyle drogi do szczytu
 FACE_LIMITS = (0.15, 0.95)
 BACKGROUND_Q = 0.95
 MIN_GAIN = 0.08                # szczyt musi wystawać ponad tło co najmniej o tyle
 MIN_HITS = 2                   # tyle prób musi przekroczyć próg
-MIN_HEAD_MOVES = 3             # tyle z 4 ruchów głowy musi być widać, żeby zmienić próg żyroskopu
 DISABLED = 2.0                 # próg gestu wyłączonego na tę sesję (pewność nigdy go nie osiągnie)
 WARMUP_S = 3.0                 # jak gestures.recognizer.WARMUP_S: wcześniejsze okna nie nadają się na tło
 SPILL_S = 1.5                  # okno modelu (bundle win_s): ruch z poprzedniego kroku widać jeszcze tyle sekund
 
-_HEAD_TEXT = {
-    "head_left": ("Głowa w lewo", "Obróć głowę w lewo i wróć na środek."),
-    "head_right": ("Głowa w prawo", "Obróć głowę w prawo i wróć na środek."),
-    "head_up": ("Głowa w górę", "Unieś głowę i wróć na środek."),
-    "head_down": ("Głowa w dół", "Opuść głowę i wróć na środek."),
+_HEAD_TEXT = {        # (napis, polecenie głosem, podpowiedź)
+    "head_left": ("Przechyl głowę w lewo", "Przechyl głowę w lewo.", "Ucho do lewego ramienia, potem wróć na środek."),
+    "head_right": ("Przechyl głowę w prawo", "Przechyl głowę w prawo.",
+                   "Ucho do prawego ramienia, potem wróć na środek."),
+    "head_up": ("Głowa w górę", "Unieś głowę.", "Unieś brodę i wróć na środek."),
+    "head_down": ("Głowa w dół", "Opuść głowę.", "Opuść brodę i wróć na środek."),
+}
+_TURN_TEXT = {        # obrót głowy (żyroskop): drugi sposób na lewo/prawo
+    "head_left": ("Obróć głowę w lewo", "Obróć głowę w lewo.", "Obróć głowę w lewo jak przy patrzeniu w bok, potem wróć na środek."),
+    "head_right": ("Obróć głowę w prawo", "Obróć głowę w prawo.",
+                   "Obróć głowę w prawo jak przy patrzeniu w bok, potem wróć na środek."),
 }
 # szczęka: tak jak w treningu modelu (sesje "jaw": szeroko otwarte usta)
 _FACE_TEXT = {
-    "double_blink": ("Mrugnij dwa razy", "Mrugnij dwa razy.", "Dwa szybkie, wyraźne mrugnięcia."),
+    "long_blink": ("Zamknij oczy na pół sekundy", "Zamknij oczy na pół sekundy.",
+                   "Zamknij oczy, policz w myślach do jednego i otwórz."),
     "jaw": ("Otwórz usta", "Otwórz usta.", "Otwórz szeroko usta i zamknij."),
     "frown": ("Zmarszcz czoło", "Zmarszcz czoło.", "Mocno zmarszcz czoło i rozluźnij."),
 }
@@ -63,8 +83,8 @@ _FACE_TEXT = {
 
 @dataclass(frozen=True)
 class Step:
-    key: str               # "rest", "head_left", "blink_2", ...
-    kind: str              # "rest" | "head" | "face"
+    key: str               # "rest", "head_left", "long_blink_2", ...
+    kind: str              # "rest" | "head" | "turn" | "face"
     gesture: str | None
     seconds: float
     say: str               # polecenie głosem
@@ -75,8 +95,12 @@ class Step:
 def plan() -> list[Step]:
     steps = [Step("rest", "rest", None, REST_S, "Kalibracja. Usiądź spokojnie i patrz przed siebie.",
                   "Spokój", "Siedź nieruchomo i patrz przed siebie.")]
-    for g, (title, hint) in _HEAD_TEXT.items():
-        steps.append(Step(g, "head", g, HEAD_S, title + ".", title, hint))
+    for g in DIRECTIONS:
+        title, say, hint = _HEAD_TEXT[g]
+        steps.append(Step(g, "head", g, HEAD_S, say, title, hint))
+    for g, side in (("head_left", "left"), ("head_right", "right")):
+        title, say, hint = _TURN_TEXT[g]
+        steps.append(Step(f"turn_{side}", "turn", g, HEAD_S, say, title, hint))
     for k in range(1, FACE_REPEATS + 1):
         for g in FACE:
             title, say, hint = _FACE_TEXT[g]
@@ -100,7 +124,7 @@ class Calibration:
         self.index = 0
         self.pos = 0                                    # próbki bieżącego kroku
         self.result: dict | None = None
-        self._head: dict[str, float] = {g: 0.0 for g in HEAD_AXIS}
+        self._tilt = TiltCalibrator()
         self._background: dict[str, list[float]] = {g: [] for g in FACE}
         self._trials: dict[str, list[float]] = {g: [] for g in FACE}    # maksimum pewności w każdej próbie
         self._trial_max: float | None = None
@@ -116,12 +140,13 @@ class Calibration:
             self.state = "skipped"
             self.result = None
 
-    def feed(self, n: int, vmax, vmin, outs: list[dict]) -> list[Step]:
-        """Kawałek sygnału: n próbek, skrajne prędkości głowy [obrót, pochylenie] i wyniki modelu z tego kawałka.
-        Zwraca kroki, które się w nim zaczęły."""
+    def feed(self, n: int, motion: dict, outs: list[dict]) -> list[Step]:
+        """Kawałek sygnału: n próbek, motion["g"] = kierunek grawitacji (brak = nie wiadomo), motion["yaw"] = obrót
+        głowy od środka [°] (żyroskop; brak = nie wiadomo) i wyniki modelu z tego kawałka. Zwraca kroki, które się
+        w nim zaczęły."""
         if self.state != "running":
             return []
-        self._collect(self.steps[self.index], vmax, vmin, outs)
+        self._collect(self.steps[self.index], (motion or {}).get("g"), outs, (motion or {}).get("yaw"))
         self.pos += int(n)
         if self._carry is not None and self.pos >= self.spill_n:
             self._finish_carry()
@@ -140,11 +165,12 @@ class Calibration:
                 started.append(self.steps[self.index])
         return started
 
-    def _collect(self, step: Step, vmax, vmin, outs: list[dict]) -> None:
-        if step.kind == "head":
-            axis, sign = HEAD_AXIS[step.gesture]
-            speed = float(vmax[axis]) if sign > 0 else -float(vmin[axis])
-            self._head[step.gesture] = max(self._head[step.gesture], speed)
+    def _collect(self, step: Step, g, outs: list[dict], yaw: float | None = None) -> None:
+        if g is not None:
+            self._tilt.add("neutral" if step.kind == "rest" else step.gesture if step.kind == "head" else "", g)
+        if step.kind == "turn" and yaw is not None:
+            self._tilt.add_turn(step.gesture, yaw)
+        if step.kind in ("head", "turn"):
             return
         prev = self.steps[self.index - 1] if self.index else None
         spill = prev is not None and prev.kind != "rest" and self.pos < self.spill_n
@@ -177,10 +203,6 @@ class Calibration:
 
     # --- wynik
     def _compute(self) -> dict:
-        moves = [p for p in self._head.values() if p >= GYRO_LIMITS[0]]
-        head_dps = None
-        if len(moves) >= MIN_HEAD_MOVES:
-            head_dps = round(_clip(PEAK_FRACTION * float(np.median(moves)), GYRO_LIMITS), 1)
         gestures = {}
         for g in FACE:
             trials, bg = self._trials[g], self._background[g]
@@ -195,8 +217,7 @@ class Calibration:
                 entry.update(threshold=thr, peak=round(peak, 3), hits=int(hits),
                              works=bool(peak > background + MIN_GAIN and hits >= MIN_HITS))
             gestures[g] = entry
-        return {"head_dps": head_dps, "head_peaks": {g: round(p, 1) for g, p in self._head.items()},
-                "gestures": gestures}
+        return {"head": self._tilt.result(), "gestures": gestures}
 
     def thresholds(self) -> dict[str, float]:
         """Progi tej sesji nadpisujące ustawienia: gest działający -> jego próg, niedziałający -> DISABLED.

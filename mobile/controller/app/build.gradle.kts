@@ -12,8 +12,8 @@ android {
         applicationId = "pl.halorush.controller"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 8
+        versionName = "0.5.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

@@ -68,11 +68,11 @@ class MainActivityManualTest {
         try {
             all().filterIsInstance<EditText>().first().setText(server.url("/ws/controller").toString().replaceFirst("http", "ws"))
             activity.findViewById<RadioButton>(R.id.mode_manual).performClick()
-            click("Dalej")
+            click("Next")
             until { all().any { it is RetroPadView } }
             @Suppress("DEPRECATION")
             assertTrue(activity.window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN != 0)
-            assertFalse(all().filterIsInstance<Button>().any { it.text.toString() == "Szukaj HALO" })
+            assertFalse(all().filterIsInstance<Button>().any { it.text.toString() == "Search for HALO" })
             click("A")
             until { messages.any { it["type"]?.jsonPrimitive?.content == "manual" } }
             assertEquals("a", messages.last().getValue("button").jsonPrimitive.content)
@@ -117,7 +117,7 @@ class MainActivityManualTest {
             assertTrue(beforeSwitch.all { it["session_id"] == firstSession })
             assertEquals(listOf(0, 1, 2), beforeSwitch.map { it.getValue("seq").jsonPrimitive.int })
 
-            click("GRACZ 2")
+            click("Player 2")
             until { messages.count { it["type"]?.jsonPrimitive?.content == "hello" } == 2 && all().any { it is RetroPadView } }
             click("B")
             until { messages.count { it["type"]?.jsonPrimitive?.content == "manual" } == 4 }
@@ -125,8 +125,8 @@ class MainActivityManualTest {
             assertEquals(listOf(1, 1, 1, 2), events.map { it.getValue("player").jsonPrimitive.int })
             assertNotEquals(events[0]["session_id"], events[3]["session_id"])
             assertEquals(listOf(0, 1, 2, 0), events.map { it.getValue("seq").jsonPrimitive.int })
-            click("Zakończ / zmień tryb")
-            until { all().filterIsInstance<Button>().any { it.text.toString() == "Dalej" } }
+            click("End / change mode")
+            until { all().filterIsInstance<Button>().any { it.text.toString() == "Next" } }
             @Suppress("DEPRECATION")
             assertEquals(0, activity.window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN)
             until { messages.count { it["type"]?.jsonPrimitive?.content == "stop" } == 2 }

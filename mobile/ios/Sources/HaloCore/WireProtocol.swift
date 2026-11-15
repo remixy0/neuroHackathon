@@ -12,18 +12,18 @@ public enum ControllerError: Error, LocalizedError, Sendable {
     case rejected(String), notReady, closed, timeout, missingAck, missingPong
     public var errorDescription: String? {
         switch self {
-        case .invalidAddress: return "Podaj poprawny adres ws:// lub wss://."
-        case .invalidToken: return "Token nie może zawierać nowych linii."
-        case .invalidPlayer: return "Wybierz gracza 1 lub 2."
-        case .invalidMessage: return "Serwer wysłał niepoprawną wiadomość."
-        case .wrongSession: return "Niezgodna wersja lub identyfikator sesji."
-        case .unsupportedMode: return "Serwer nie potwierdził trybu manual."
+        case .invalidAddress: return "Enter a valid ws:// or wss:// address."
+        case .invalidToken: return "The token cannot contain line breaks."
+        case .invalidPlayer: return "Choose player 1 or 2."
+        case .invalidMessage: return "The server sent an invalid message."
+        case .wrongSession: return "Incompatible version or session id."
+        case .unsupportedMode: return "The server did not confirm manual mode."
         case .rejected(let message): return message
-        case .notReady: return "Kontroler nie jest połączony."
-        case .closed: return "Połączenie zamknięte."
-        case .timeout: return "Serwer nie odpowiedział w terminie."
-        case .missingAck: return "Brak potwierdzenia zdarzenia przez 2 s."
-        case .missingPong: return "Utracono kontakt z serwerem."
+        case .notReady: return "The controller is not connected."
+        case .closed: return "Connection closed."
+        case .timeout: return "The server did not respond in time."
+        case .missingAck: return "No event acknowledgement for 2 s."
+        case .missingPong: return "Lost contact with the server."
         }
     }
     public var retryable: Bool {
@@ -82,7 +82,7 @@ public enum WireProtocol {
         guard text.utf8.count <= 16_384, let data = text.data(using: .utf8),
               let message = try? JSONDecoder().decode(ServerMessage.self, from: data) else { throw ControllerError.invalidMessage }
         guard message.version == 1, message.sessionID == session else { throw ControllerError.wrongSession }
-        if message.type == "error" { throw ControllerError.rejected(message.message ?? "Serwer odrzucił sesję.") }
+        if message.type == "error" { throw ControllerError.rejected(message.message ?? "The server rejected the session.") }
         return message
     }
 }

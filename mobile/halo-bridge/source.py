@@ -57,7 +57,7 @@ class HaloSource:
         try:
             self.queue.put_nowait(packet)
         except queue.Full:
-            self.error = "Most nie nadąża z transmisją; sesja została zatrzymana."
+            self.error = "The bridge cannot keep up with the stream; the session was stopped."
             self.stop.set()
 
     def _metadata(self, hardware, accel, gyro):
@@ -96,7 +96,7 @@ class HaloSource:
                 info = mgr.get_device_info()
                 features = mgr.get_device_features()
                 if info.device_model.name not in {"HALO", "HALO_V2", "HALO_V3"} or features.electrode_count() != 4:
-                    raise ValueError("Ten most obsługuje wyłącznie czterokanałowe HALO.")
+                    raise ValueError("This bridge supports only four-channel HALO.")
                 mgr.set_impedance_mode(ImpedanceMeasurementMode.OFF)
                 mgr.set_output_mode(OutputMode.NORMAL)
                 mgr.set_sample_rate(250)
@@ -114,7 +114,7 @@ class HaloSource:
                 mgr.set_channel_enabled(ch.STREAMING, True)
                 mgr.load_config()
                 if mgr.get_sample_frequency() != 250:
-                    raise ValueError("HALO nie potwierdziło 250 Hz.")
+                    raise ValueError("HALO did not confirm 250 Hz.")
                 rows = {key: [mgr.get_channel_index(c) for c in values] for key, values in ids.items()}
                 rows.update(index=mgr.get_channel_index(ch.SAMPLE_NUMBER), streaming=mgr.get_channel_index(ch.STREAMING))
                 missed, battery = 0, None
@@ -123,7 +123,7 @@ class HaloSource:
                     battery = float(value.level) if 0 <= value.level <= 100 else None
                 def disconnected():
                     if not self.stop.is_set():
-                        self.error = "HALO rozłączyło Bluetooth."
+                        self.error = "HALO disconnected Bluetooth."
                         self.stop.set()
                 def chunk(data, count):
                     nonlocal missed

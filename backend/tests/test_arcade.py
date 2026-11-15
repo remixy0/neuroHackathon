@@ -69,6 +69,25 @@ def test_press_reaches_arcade():
     asyncio.run(main())
 
 
+def test_position_reaches_arcade():
+    """Tryb analogowy: format Arcade dla osi analogowej (README Arcade: {"player": 2, "pos": 0.42})."""
+    async def main():
+        port = free_port()
+        fake = FakeArcade(port)
+        await fake.start()
+        link = ArcadeLink(f"ws://127.0.0.1:{port}")
+        task = asyncio.create_task(link.run())
+        assert await link.position(1, 0.5) is False                 # jeszcze niepołączony
+        await wait_for(lambda: link.connected)
+        assert await link.position(1, 0.25) is True
+        await wait_for(lambda: fake.received)
+        assert fake.received[0] == {"player": 1, "pos": 0.25}
+        await link.close()
+        task.cancel()
+        await fake.stop()
+    asyncio.run(main())
+
+
 def test_state_tracked():
     async def main():
         port = free_port()

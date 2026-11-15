@@ -20,8 +20,11 @@ def main() -> None:
                     help="katalog na zapis sesji EEG (ustawienie 'record' włącza i wyłącza zapis)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    from .sessions import _tools_on_path
+    _tools_on_path()
+    from gestures.data import TRAIN_DIR          # kalibracje głowy z aplikacji: tools/training/calibration/
     app = create_app(args.settings, token=os.environ.get("HALO_TOKEN") or None, voice=Voice(),
-                     recordings_dir=args.recordings)
+                     recordings_dir=args.recordings, calibration_dir=TRAIN_DIR)
     print(f"\n  Ustawienia:  http://localhost:{args.port}/")
     for ip in lan_ips():
         print(f"  Telefon:     ws://{ip}:{args.port}/ws/controller   (strona: http://{ip}:{args.port}/)")

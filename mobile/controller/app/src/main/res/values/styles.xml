@@ -1,9 +1,15 @@
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+    <!-- Light setup screens (#F2F3F8), indigo accent (#5B4CF5); game screens set their own dark background -->
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#C7FF61</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowBackground">#101510</item>
-        <item name="android:navigationBarColor">#101510</item>
+        <item name="android:colorAccent">#5B4CF5</item>
+        <item name="android:colorPrimary">#F2F3F8</item>
+        <item name="android:colorPrimaryDark">#F2F3F8</item>
+        <item name="android:textColorPrimary">#151936</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F2F3F8</item>
+        <item name="android:windowBackground">@color/halo_case</item>
+        <item name="android:navigationBarColor">#F2F3F8</item>
     </style>
+    <color name="halo_case">#F2F3F8</color>
 </resources>

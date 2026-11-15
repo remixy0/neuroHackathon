@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 
 import pytest
@@ -38,7 +39,7 @@ def hello_manual(player=1, sid=SID2):
 def samples(seq, first, n=10, sid=SID):
     return {"type": "samples", "version": 1, "session_id": sid, "seq": seq, "sample_count": n,
             "first_sample_index": str(first), "wire_last_sample_index": str(first + n - 1),
-            "host_time_ns": str(10 ** 15 + seq), "eeg": [float(i % 7) for i in range(n * 4)],
+            "host_time_ns": str(time.monotonic_ns()), "eeg": [float(i % 7) for i in range(n * 4)],
             "accel": [0.0, 9.8, 0.0] * n, "gyro": [0.0, 0.0, 0.0] * n, "is_dummy": [False] * n,
             "contact": [True] * 4, "battery_pct": 77.0, "phone_discarded_samples": "0", "ble_missed_samples": "0"}
 
@@ -142,10 +143,52 @@ def test_eeg_hello_ready_and_ack(tmp_path, bundle):
         assert ws.receive_json() == {"type": "ready", "version": 1, "session_id": SID, "player": 1}
         for i in range(3):
             send(ws, samples(i, 250 + i * 10))
-        acks = [ws.receive_json() for _ in range(3)]
-        assert [a["seq"] for a in acks] == [0, 1, 2] and all(a["type"] == "ack" for a in acks)
+        assert recv(ws) == {"type": "ack", "version": 1, "session_id": SID, "seq": 0}     # pierwszy od razu
+        assert recv(ws) == {"type": "ack", "version": 1, "session_id": SID, "seq": 2}     # reszta narastająco
         snap = app.state.hub.snapshot()["players"]["1"]
         assert snap["mode"] == "eeg" and snap["packets"] == 3 and snap["battery"] == 77
+
+
+def recv(ws, timeout=2.0):
+    """receive_json z limitem czasu: brak wiadomości ma oblać test, a nie go zawiesić."""
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("m", ws.receive_json()), daemon=True)
+    t.start()
+    t.join(timeout)
+    assert "m" in out, f"brak wiadomości przez {timeout} s"
+    return out["m"]
+
+
+def test_eeg_acks_are_batched(tmp_path, bundle):
+    """Telefon wysyła 50 pakietów/s; ACK na każdy to drugie 50 ramek/s przez hotspot (czas radia telefonu, który
+    dzieli je z Bluetoothem). ACK jest narastający (WEBSOCKET.md §4): pierwszy od razu, potem co ACK_INTERVAL_S."""
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c, c.websocket_connect("/ws/controller") as ws:
+        send(ws, hello_eeg())
+        assert ws.receive_json()["type"] == "ready"
+        for i in range(20):
+            send(ws, samples(i, 250 + i * 10))
+        acks = [recv(ws)]
+        while acks[-1]["seq"] < 19:
+            acks.append(recv(ws, 1.0))
+        seqs = [a["seq"] for a in acks]
+        assert seqs[0] == 0 and seqs == sorted(set(seqs)) and len(acks) <= 4
+        assert app.state.hub.snapshot()["players"]["1"]["packets"] == 20
+
+
+def test_last_packets_acked_without_more_data(tmp_path, bundle):
+    """Przerwa w danych (np. Bluetooth): ostatnie pakiety są potwierdzane bez czekania na kolejne - telefon
+    zrywa sesję po 5 s bez ACK."""
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c, c.websocket_connect("/ws/controller") as ws:
+        send(ws, hello_eeg())
+        assert ws.receive_json()["type"] == "ready"
+        for i in range(3):
+            send(ws, samples(i, 250 + i * 10))
+        assert recv(ws)["seq"] == 0
+        t0 = time.monotonic()
+        assert recv(ws, 1.0)["seq"] == 2
+        assert time.monotonic() - t0 < 0.6
 
 
 def test_eeg_unsupported_stream(tmp_path, bundle):
@@ -244,10 +287,10 @@ def test_put_settings_roundtrip(tmp_path, bundle):
     app, arc = make(tmp_path, bundle)
     with TestClient(app) as c:
         data = c.get("/api/settings").json()
-        data["profiles"]["runner"]["double_blink"] = {"button": "up", "ms": 150}
+        data["profiles"]["runner"]["long_blink"] = {"button": "up", "ms": 150}
         data["arcade_url"] = "ws://10.1.1.1:8787"
         assert c.put("/api/settings", json=data).status_code == 200
-        assert c.get("/api/settings").json()["profiles"]["runner"]["double_blink"] == {"button": "up", "ms": 150}
+        assert c.get("/api/settings").json()["profiles"]["runner"]["long_blink"] == {"button": "up", "ms": 150}
         assert arc.url == "ws://10.1.1.1:8787"
 
 
@@ -360,6 +403,15 @@ def test_api_info_marks_gestures_missing_from_model(tmp_path, bundle):
     app, _ = make(tmp_path, bundle)
     with TestClient(app) as c:
         g = {x["id"]: x for x in c.get("/api/info").json()["gestures"]}
-    assert "blink" not in g and "double_blink" in g
+    assert "blink" not in g and "double_blink" not in g
     assert g["jaw"]["in_model"] is True
-    assert g["double_blink"]["in_model"] is ("double_blink" in bundle["classes"])
+    assert g["look_left"]["in_model"] is ("look_left" in bundle["classes"])
+
+
+def test_info_long_blink_is_rule_based(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c:
+        g = {x["id"]: x for x in c.get("/api/info").json()["gestures"]}
+    assert "double_blink" not in g
+    assert g["long_blink"]["in_model"] is True and g["long_blink"]["rule"] == "fp"
+    assert g["jaw"].get("rule") is None

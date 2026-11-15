@@ -24,11 +24,18 @@ class FakeArcadeLink:
         self.state = state
         self.last_error = None
         self.presses: list[tuple[int, str, int, str]] = []
+        self.positions: list[tuple[int, float]] = []
 
     async def press(self, player, button, ms, id):
         if not self.connected:
             return False
         self.presses.append((player, button, ms, id))
+        return True
+
+    async def position(self, player, pos):
+        if not self.connected:
+            return False
+        self.positions.append((player, pos))
         return True
 
     def set_url(self, url):
@@ -47,7 +54,8 @@ def eeg_hello(player: int = 1, sid: str = SID) -> P.Hello:
 
 def make_packet(seq: int, first: int, n: int = 10, dummy: list[bool] | None = None,
                 contact: list[bool] | None = None, eeg: np.ndarray | None = None,
-                accel: np.ndarray | None = None, gyro: np.ndarray | None = None) -> P.Packet:
+                accel: np.ndarray | None = None, gyro: np.ndarray | None = None,
+                host_time_ns: int | None = None) -> P.Packet:
     rng = np.random.default_rng(seq)
     return P.Packet(
         seq=seq, n=n, first_index=first,
@@ -56,7 +64,7 @@ def make_packet(seq: int, first: int, n: int = 10, dummy: list[bool] | None = No
         gyro=gyro if gyro is not None else np.zeros((n, 3)),
         dummy=np.asarray(dummy if dummy is not None else [False] * n, dtype=bool),
         contact=contact if contact is not None else [True] * 4,
-        battery=80.0,
+        battery=80.0, host_time_ns=host_time_ns,
     )
 
 

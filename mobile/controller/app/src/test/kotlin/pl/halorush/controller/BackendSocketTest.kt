@@ -132,7 +132,9 @@ class BackendSocketTest {
             backend.open(server.url("/").toString().replaceFirst("http", "ws"), "")
             backend.handshake(Protocol.hello("test", 1, "d", "HALO", "HALO_V3", fixture()))
             backend.send(fixture(), 0, 0)
-            now = 2_000_000_001L
+            now = 3_000_000_000L
+            backend.checkHealth() // Wi-Fi hotspot stalls of 0.5-2.7 s must not end the session
+            now = 5_000_000_001L
             assertThrows(IOException::class.java) { backend.checkHealth() }
         } finally { backend.close(false); server.close(); http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
     }

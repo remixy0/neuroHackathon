@@ -50,8 +50,9 @@ enum TrainMode: String, CaseIterable, Identifiable {
             return "Patrz na krzyżyk. Po każdym sygnale mrugnij dwa razy, szybko i wyraźnie. "
                 + "Między sygnałami staraj się nie mrugać."
         case .head:
-            return "Najpierw zobaczysz i usłyszysz kierunek. Na sygnał obróć albo pochyl głowę w tę stronę i zostań tak. "
-                + "Na drugi sygnał wróć głową do środka."
+            // lewo/prawo = przechyl (ucho do ramienia): gry biora glowe z akcelerometru, ktory nie widzi obrotu
+            return "Najpierw zobaczysz i usłyszysz kierunek. Na sygnał przechyl głowę w tę stronę, przy lewo i prawo "
+                + "ucho do ramienia, przy górze i dole unieś albo opuść brodę, i zostań tak. Na drugi sygnał wróć głową do środka."
         case .frown:
             return "Na sygnał mocno zmarszcz czoło albo unieś brwi i trzymaj. Na drugi sygnał rozluźnij twarz."
         case .jaw:
@@ -74,6 +75,7 @@ enum TrainMode: String, CaseIterable, Identifiable {
                 + "mrugnięcia. Podwójne mrugnięcie zastąpiło pojedyncze: zwykłe mrugnięcie zdarza się samo i nie jest gestem."
         case .head:
             return "Kierunek (strzałka + głos), po chwili piknięcie = ruch głowy i przytrzymanie 1,5 s, drugi dźwięk = powrót. "
+                + "Lewo i prawo to przechył (ucho do ramienia), nie obrót — tak sterują gry. "
                 + "Lewo, prawo, góra, dół po równo, w losowej kolejności."
         case .frown:
             return "Piknięcie = zmarszcz czoło i trzymaj 2 s, drugi dźwięk = rozluźnij. Przerwy 2,5–4 s."
@@ -165,6 +167,9 @@ final class Hub: ObservableObject {
     var emoTask: Task<Void, Never>?
     var emoRatingWaiter: CheckedContinuation<[Int: EmoRating]?, Never>?
     var emoSkip = false
+    /// Ekran "Kalibracja glowy": prowadzona kalibracja jednego czepka (HeadCalibrationView.swift).
+    @Published var tiltRun: TiltRun?
+    var tiltTask: Task<Void, Never>?
 
     init() {
         engines = [Engine(slot: 1), Engine(slot: 2)]
@@ -177,7 +182,8 @@ final class Hub: ObservableObject {
     var slots: [Engine] { secondSlot ? engines : [engines[0]] }
     var active: [Engine] { slots.filter(\.isStreaming) }
     var sessionOn: Bool { run.map { !$0.finished } ?? false }
-    var busy: Bool { sessionOn || (emoRun.map { !$0.finished } ?? false) }
+    var tiltOn: Bool { tiltRun.map { !$0.finished } ?? false }
+    var busy: Bool { sessionOn || (emoRun.map { !$0.finished } ?? false) || tiltOn }
 
     /// Te same imiona w dwoch czepkach pomieszalyby dane.
     var duplicatePeople: Bool {
@@ -216,6 +222,7 @@ final class Hub: ObservableObject {
         if sessionOn, active.isEmpty { stopSession() }
         if sessionOn, run?.mode == .keys, runTargets.contains(where: { !$0.isStreaming }) { stopSession() }
         if let r = emoRun, !r.finished, active.isEmpty { stopEmotions() }
+        if let r = tiltRun, !r.finished, !active.contains(where: { $0.slot == r.slot }) { stopTilt() }
     }
 
     // MARK: sesja treningowa
@@ -474,7 +481,7 @@ final class Hub: ObservableObject {
         }
     }
 
-    private static let headWords = ["head_left": "w lewo", "head_right": "w prawo", "head_up": "w górę",
+    private static let headWords = ["head_left": "przechyl w lewo", "head_right": "przechyl w prawo", "head_up": "w górę",
                                     "head_down": "w dół"]
 
     @MainActor

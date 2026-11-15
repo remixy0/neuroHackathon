@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 from . import protocol as P
 from .arcade import ArcadeLink
 from .sessions import EegSession, Hub, ManualSession, load_bundle
-from .settings import GESTURE_PL, GESTURES, PROFILE_PL, PROFILES, SettingsStore
+from .settings import GESTURE_PL, GESTURES, PROFILE_PL, PROFILES, RULE_GESTURES, SettingsStore
 
 log = logging.getLogger("halo.app")
 
@@ -64,8 +64,50 @@ def reliability() -> dict[str, float]:
         return {}
 
 
+# Sesja EEG bez próbek przez tyle sekund jest zamykana. Dłużej niż limit telefonu (5 s bez ack, BackendSocket.kt):
+# po zacięciu Wi-Fi (hotspot: przerwy do ok. 3 s) sesja trwa dalej, zamiast zaczynać się od nowa z rozgrzewką.
+EEG_IDLE_S = 6.0
+# Potwierdzenia próbek EEG: pierwsze od razu, potem narastająco najwyżej co tyle (WEBSOCKET.md §4 na to pozwala).
+# ACK na każdy pakiet to drugie 50 ramek/s przez hotspot na telefon - czas radia, które telefon dzieli z Bluetoothem.
+ACK_INTERVAL_S = 0.25
+
+
 class _Disconnected(Exception):
     pass
+
+
+class _Acks:
+    """Narastające ACK dla jednej sesji EEG. accepted(seq) po przyjęciu pakietu; run() w tle potwierdza ostatnie
+    pakiety także wtedy, gdy kolejne nie przychodzą (telefon zrywa sesję po 5 s bez ACK)."""
+
+    def __init__(self, ws: WebSocket, sid: str):
+        self.ws, self.sid = ws, sid
+        self.accepted = -1
+        self.sent = -1
+        self.last = 0.0
+
+    async def accepted_seq(self, seq: int) -> None:
+        self.accepted = seq
+        if self.sent < 0 or time.monotonic() - self.last >= ACK_INTERVAL_S:
+            await self.flush()
+
+    async def flush(self) -> None:
+        seq = self.accepted
+        if seq <= self.sent:
+            return
+        self.sent, self.last = seq, time.monotonic()
+        await self.ws.send_text(P.encode("ack", self.sid, seq=seq))
+
+    async def run(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(ACK_INTERVAL_S)
+                if self.accepted > self.sent and time.monotonic() - self.last >= ACK_INTERVAL_S:
+                    await self.flush()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001  gniazdo zamknięte - pętla główna kończy sesję
+            return
 
 
 def _text(msg: dict) -> str:
@@ -77,14 +119,16 @@ def _text(msg: dict) -> str:
 
 
 def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle: dict | None = None,
-               eeg_idle_s: float = 3.0, hello_timeout_s: float = 5.0, token: str | None = None,
-               voice=None, recordings_dir: Path | str | None = None) -> FastAPI:
+               eeg_idle_s: float = EEG_IDLE_S, hello_timeout_s: float = 5.0, token: str | None = None,
+               voice=None, recordings_dir: Path | str | None = None,
+               calibration_dir: Path | str | None = None) -> FastAPI:
     """voice: voice.Voice do poleceń kalibracji (None = bez głosu); recordings_dir: dokąd zapisywać sesje EEG
-    (None = bez zapisu). Serwer uruchamiany przez `python -m backend` podaje oba (__main__.py)."""
+    (None = bez zapisu); calibration_dir: skąd brać kalibracje głowy z aplikacji macOS (None = bez nich).
+    Serwer uruchamiany przez `python -m backend` podaje wszystkie trzy (__main__.py)."""
     bundle = bundle if bundle is not None else load_bundle()
     store = SettingsStore(settings_path, bundle.get("thresholds") or {})
     arcade = arcade if arcade is not None else ArcadeLink(store.data["arcade_url"])
-    hub = Hub(store, arcade, bundle, voice=voice, recordings_dir=recordings_dir)
+    hub = Hub(store, arcade, bundle, voice=voice, recordings_dir=recordings_dir, calibration_dir=calibration_dir)
     rel = reliability()
 
     @asynccontextmanager
@@ -107,6 +151,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
         sid = NIL_UUID
         session: EegSession | ManualSession | None = None
         worker: asyncio.Task | None = None
+        acks: _Acks | None = None
+        acker: asyncio.Task | None = None
 
         async def send(text: str) -> None:
             await ws.send_text(text)
@@ -136,6 +182,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
             log.info("P%d połączony (%s, %s)", hello.player, hello.mode, hello.device.get("name") or "pad")
             if isinstance(session, EegSession):
                 worker = asyncio.create_task(session.worker())
+                acks = _Acks(ws, sid)
+                acker = asyncio.create_task(acks.run())
             idle = eeg_idle_s if hello.mode == "eeg" else None
             seq = 0
             while True:
@@ -156,7 +204,7 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
                     packet = P.parse_samples(msg, hello, seq)
                     session.accept(packet, time.monotonic())
                     session.stats["acked"] = seq
-                    await ws.send_text(P.encode("ack", sid, seq=seq))
+                    await acks.accepted_seq(seq)
                     seq += 1
                 elif kind == "manual" and isinstance(session, ManualSession):
                     press = P.parse_manual(msg, hello, seq)
@@ -180,6 +228,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
         except (_Disconnected, WebSocketDisconnect):
             pass
         finally:
+            if acker is not None:
+                acker.cancel()
             if worker is not None:
                 worker.cancel()
             if isinstance(session, EegSession):
@@ -247,7 +297,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
         return {
             "gestures": [{"id": g, "name": GESTURE_PL[g], "reliability": rel.get(g),
                           "model_threshold": round(float(thr.get(g, 0.5)), 3),
-                          "in_model": g in classes} for g in GESTURES],
+                          "in_model": g in classes or g in RULE_GESTURES, "rule": RULE_GESTURES.get(g)}
+                         for g in GESTURES],
             "profiles": [{"id": p, "name": PROFILE_PL[p]} for p in PROFILES],
             "buttons": list(P.BUTTONS),
             "phone_urls": [f"ws://{ip}:{port}/ws/controller" for ip in lan_ips()]
