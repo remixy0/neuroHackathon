@@ -1,0 +1,24 @@
+{
+  "name": "arcade",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "relay": "node server/index.js",
+    "test": "node --test",
+    "mock:halo": "node examples/halo_mock.js"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "vite": "^7.0.0",
+    "ws": "^8.18.0"
+  }
+}

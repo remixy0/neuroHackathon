@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#c8c4bb">
+<title>Arcade pad</title>
+<style>
+  /* Pad na telefon w stylu klasycznego kontrolera NES: szara obudowa, czarny panel,
+     krzyżak po lewej, START nad SELECT na środku, X oraz czerwone A nad B po prawej. */
+  :root {
+    --case: #c8c4bb; --case-dark: #b3aea3; --print: #2b3070; --print-soft: #4d5170;
+    --panel: #222224; --dpad: #161617; --dpad-hi: #3a3a3e;
+    --red: #c8202a; --red-hi: #e5414a; --key: #d8d4cb;
+    --bezel: #5c5d70; --bezel-text: #b9bacb; --led-off: #3f4050; --led-on: #e2382d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: var(--case); color: var(--print);
+    font: 15px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif;
+    user-select: none; -webkit-user-select: none; touch-action: none; overflow: hidden; overscroll-behavior: none;
+    height: 100dvh;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+  }
+
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .seg { display: flex; background: var(--case-dark); border-radius: 999px; padding: 3px; }
+  .seg button {
+    border: 0; background: none; font: 600 14px system-ui, sans-serif; color: var(--print-soft);
+    padding: 8px 14px; border-radius: 999px; white-space: nowrap;
+  }
+  .seg button.on { background: var(--print); color: #fff; }
+  .led { width: 10px; height: 10px; border-radius: 50%; background: var(--led-off); }
+  .led.on { background: var(--led-on); }
+
+  .bezel { background: var(--bezel); padding: 7px 16px 12px; border-radius: 8px 8px 26px 8px; }
+  .bezel small { display: block; color: var(--bezel-text); font: italic 600 11px system-ui, sans-serif; margin-bottom: 5px; }
+  .lcd {
+    background: #000; color: #ececec; padding: 8px 12px; min-height: 58px;
+    font: 700 15px/1.3 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-content: center;
+  }
+  .lcd .big { font-size: 24px; line-height: 1.1; }
+  .lcd .dim { color: #8c8c8c; }
+
+  /* ---------- czarny panel kontrolera ----------
+     Rozmiary liczone od wymiarów samego panelu (cqw/cqh), więc wszystko mieści się na każdym ekranie.
+     --s: ramię krzyżaka, --k: kwadrat A/B/X, --w: szerokość START/SELECT */
+  .panel {
+    flex: 1; min-height: 0; position: relative;
+    container-type: size;
+    background: var(--panel);
+    border-radius: 10px;
+    border: 6px solid var(--case-dark);
+    padding: 16px;
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-areas: "dpad dpad" "sys ab";
+    align-content: center; justify-content: center;
+    justify-items: center; align-items: center;
+    gap: clamp(14px, 4cqh, 32px) clamp(12px, 5cqw, 28px);
+    --k: min(28cqw, calc((100cqh - 40px) / 5), 130px);
+    --s: min(31cqw, calc((100cqh - 2 * var(--k) - 40px) / 3), 130px);
+    --w: min(26cqw, 120px);
+  }
+
+  .dpad-wrap { grid-area: dpad; display: flex; }
+  .dpad {
+    display: grid; grid-template-columns: repeat(3, var(--s)); grid-template-rows: repeat(3, var(--s));
+  }
+  .dpad button, .dpad i { background: var(--dpad); border: 0; color: #55555a; font-size: calc(var(--s) * 0.4); }
+  .dpad .u { grid-area: 1 / 2; border-radius: 6px 6px 0 0; }
+  .dpad .l { grid-area: 2 / 1; border-radius: 6px 0 0 6px; }
+  .dpad i { grid-area: 2 / 2; display: grid; place-items: center; }
+  .dpad i::after { content: ''; width: 46%; height: 46%; border-radius: 50%; background: #0e0e0f; }
+  .dpad .r { grid-area: 2 / 3; border-radius: 0 6px 6px 0; }
+  .dpad .d { grid-area: 3 / 2; border-radius: 0 0 6px 6px; }
+  .dpad button.on { background: var(--dpad-hi); color: #bbb; }
+
+  /* X obok, A nad B: jednakowe szare kwadraty z dużą literą na przycisku */
+  .ab { grid-area: ab; display: flex; align-items: center; gap: min(4cqw, 20px); }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .sq {
+    width: var(--k); height: var(--k); border-radius: 10px; background: var(--key);
+    display: grid; place-items: center;
+  }
+  .sq button {
+    width: 80%; height: 80%; border-radius: 50%; border: 0; padding-bottom: 4px;
+    background: var(--red); box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.25);
+    color: #f3f1ec; font: 800 calc(var(--k) * 0.32) / 1 system-ui, 'Segoe UI', sans-serif;
+  }
+  .sq button.on { background: var(--red-hi); box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.35); padding: 4px 0 0; }
+  .sq.dark button { background: #3a3a3e; box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.35); }
+  .sq.dark button.on { background: #55555b; box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.45); }
+
+  /* START nad SELECT: czarne prostokątne klawisze z napisem */
+  .sys { grid-area: sys; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .sys button {
+    width: var(--w); height: 46px; border-radius: 8px; border: 3px solid var(--key);
+    background: var(--dpad); color: #f3f1ec;
+    font: 800 14px system-ui, 'Segoe UI', sans-serif; letter-spacing: 0.08em;
+  }
+  .sys button.on { background: var(--dpad-hi); }
+
+  #knob { display: none; }
+  .knob-mode #knob { display: flex; }
+  .knob-mode .dpad { display: none; }
+  #track { position: relative; width: min(46cqw, 220px); height: calc(var(--s) * 3); border-radius: 10px; background: #000; border: 6px solid var(--key); }
+  #handle { position: absolute; left: 12%; width: 76%; height: 16%; top: 42%; background: #ececec; }
+
+  /* ---------- telefon poziomo: krzyżak | START/SELECT | X A/B, jak w NES ---------- */
+  @media (orientation: landscape) {
+    body { gap: 8px; }
+    .bezel { display: none; }
+    .panel {
+      grid-template-columns: auto auto auto;
+      grid-template-areas: "dpad sys ab";
+      padding: 14px 3vw;
+      column-gap: clamp(12px, 4cqw, 48px);
+      --s: min(calc(100cqh / 3), 13cqw, 130px);
+      --k: min(calc((100cqh - 10px) / 2), 15cqw, 140px);
+      --w: min(14cqw, 120px);
+    }
+    #track { width: min(22cqw, 180px); }
+  }
+  /* niskie telefony trzymane pionowo: mniejszy ekran wyniku */
+  @media (orientation: portrait) and (max-height: 720px) {
+    .bezel { padding: 5px 12px 8px; }
+    .bezel small { display: none; }
+    .lcd { min-height: 0; padding: 6px 10px; }
+    .lcd .big { font-size: 20px; }
+    .panel { padding: 10px; }
+    .sys button { height: 40px; }
+  }
+  @media (max-width: 400px) { .seg button { padding: 7px 10px; font-size: 13px; } }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="seg" id="players">
+      <button type="button" data-player="1">Player 1</button>
+      <button type="button" data-player="2">Player 2</button>
+    </div>
+    <i class="led" id="led" title="Connection to the game"></i>
+    <div class="seg" id="modes">
+      <button type="button" data-mode="pad">Buttons</button>
+      <button type="button" data-mode="knob">Knob</button>
+    </div>
+  </div>
+
+  <div class="bezel">
+    <small id="label">Player 1</small>
+    <div class="lcd" id="lcd"><span class="dim">Waiting for the game</span></div>
+  </div>
+
+  <div class="panel" id="panel">
+    <div class="dpad-wrap">
+      <div class="dpad">
+        <button type="button" class="u" data-b="up" aria-label="Up">▲</button>
+        <button type="button" class="l" data-b="left" aria-label="Left">◀</button>
+        <i></i>
+        <button type="button" class="r" data-b="right" aria-label="Right">▶</button>
+        <button type="button" class="d" data-b="down" aria-label="Down">▼</button>
+      </div>
+      <div id="knob"><div id="track"><div id="handle"></div></div></div>
+    </div>
+
+    <div class="sys">
+      <button type="button" data-b="start">START</button>
+      <button type="button" data-b="select">SELECT</button>
+    </div>
+
+    <div class="ab">
+      <div class="sq dark"><button type="button" data-b="x">X</button></div>
+      <div class="stack">
+        <div class="sq"><button type="button" data-b="a">A</button></div>
+        <div class="sq"><button type="button" data-b="b">B</button></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k, d) => { try { return localStorage.getItem('arcadepad.' + k) || d; } catch { return d; } },
+    set: (k, v) => { try { localStorage.setItem('arcadepad.' + k, v); } catch { /* ignore */ } },
+  };
+  const q = new URLSearchParams(location.search);
+  let player = Number(q.get('player') || store.get('player', '1')) === 2 ? 2 : 1;
+  let mode = store.get('mode', 'pad');
+  let ws = null;
+  let lastState = 0;
+
+  function render() {
+    document.querySelectorAll('#players button').forEach((b) => b.classList.toggle('on', Number(b.dataset.player) === player));
+    document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    $('panel').classList.toggle('knob-mode', mode === 'knob');
+    $('label').textContent = 'Player ' + player;
+    history.replaceState(null, '', '?player=' + player);
+  }
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/?role=pad&player=${player}`);
+    ws.onopen = () => $('led').classList.add('on');
+    ws.onclose = () => {
+      $('led').classList.remove('on');
+      setTimeout(connect, 1500);
+    };
+    ws.onmessage = (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch { return; }
+      if (m.type === 'state') { lastState = Date.now(); show(m); }
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ player, ...obj }));
+  }
+
+  function show(m) {
+    const lcd = $('lcd');
+    const title = m.title || 'Arcade';
+    const inGame = m.screen === 'game' && m.players && m.players.length;
+    if (!inGame) {
+      lcd.innerHTML = `<span>${title}</span><span class="dim">menu</span>`;
+      return;
+    }
+    const solo = m.players.length === 1;
+    const p = m.players[player - 1] || m.players[0];
+    let note = '';
+    if (m.state === 'paused') note = 'paused';
+    else if (m.state === 'countdown') note = 'get ready';
+    else if (m.state === 'over') note = solo ? 'game over' : m.winner === player ? 'you win' : m.winner ? 'you lose' : 'draw';
+    else if (p.alive === false) note = 'out';
+    if (solo && player === 2) note = 'single player' + (note ? ', ' + note : '');
+    lcd.innerHTML = `<span class="big">${p.score}</span><span class="dim">${note || title}</span>` +
+      `<span>${p.info || ''}</span><span class="dim">${solo ? '' : title}</span>`;
+  }
+
+  setInterval(() => {
+    if (ws && ws.readyState === 1 && Date.now() - lastState > 2500) {
+      $('lcd').innerHTML = '<span class="dim">The game is not open</span>';
+    }
+  }, 1000);
+
+  // down przy wciśnięciu, up przy puszczeniu; "down" ponawiane co 1 s (serwer puszcza przycisk po 5 s ciszy)
+  document.querySelectorAll('[data-b]').forEach((el) => {
+    const button = el.dataset.b;
+    let keep = 0;
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      if (keep) return;
+      el.classList.add('on');
+      send({ button, state: 'down' });
+      keep = setInterval(() => send({ button, state: 'down' }), 1000);
+      if (navigator.vibrate) navigator.vibrate(10);
+    });
+    const up = () => {
+      if (!keep) return;
+      clearInterval(keep);
+      keep = 0;
+      el.classList.remove('on');
+      send({ button, state: 'up' });
+    };
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
+  });
+
+  // Pokrętło: pozycja 0..1 (jak potencjometr w oryginalnym Pongu)
+  const track = $('track');
+  const handle = $('handle');
+  function setPos(clientY) {
+    const r = track.getBoundingClientRect();
+    const hh = handle.offsetHeight;
+    const v = Math.max(0, Math.min(1, (clientY - r.top - hh / 2) / (r.height - hh)));
+    handle.style.top = v * (r.height - hh) + 'px';
+    send({ pos: Number(v.toFixed(3)) });
+  }
+  track.addEventListener('pointerdown', (e) => { e.preventDefault(); track.setPointerCapture(e.pointerId); setPos(e.clientY); });
+  track.addEventListener('pointermove', (e) => { if (track.hasPointerCapture(e.pointerId)) setPos(e.clientY); });
+
+  $('players').addEventListener('click', (e) => {
+    const p = Number(e.target.dataset.player);
+    if (!p || p === player) return;
+    player = p;
+    store.set('player', String(p));
+    render();
+    if (ws) { ws.onclose = null; ws.close(); }
+    connect();
+  });
+  $('modes').addEventListener('click', (e) => {
+    const m = e.target.dataset.mode;
+    if (!m) return;
+    mode = m;
+    store.set('mode', m);
+    render();
+  });
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  render();
+  connect();
+</script>
+</body>
+</html>

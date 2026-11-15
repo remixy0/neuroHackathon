@@ -12,6 +12,15 @@ from .pipeline import HOP_S, WIN_S, featurize
 from .recording import Recording, load_recording
 
 MAX_SHIFT_S = 1.6  # o ile najwyzej wolno przesunac recznie spisany znacznik
+# gesty wylaczone z treningu i rozpoznawania. Usta: dane zostaja w plikach, ale nie trafiaja do modelu.
+# Zamkniecie/otwarcie oczu i spojrzenie w gore/dol: usuniete z danych (archiwum: training/usuniete_oczy/).
+# Gora/dol wrocilo na probe z kropka (14.11.2026) i nie dzialalo (0-29%), wiec usuniete ponownie;
+# sa tu, zeby proby nagrane jeszcze stara wersja aplikacji nie trafily do modelu.
+EXCLUDED_LABELS = {"mouth_left", "mouth_right", "eyes_close", "eyes_open", "look_up", "look_down"}
+
+
+def is_excluded(label: str) -> bool:
+    return label in EXCLUDED_LABELS or label.startswith("strobe")
 
 
 def _modality(label: str) -> str:
@@ -128,6 +137,8 @@ def build(label_file: str | Path, verbose: bool = False) -> Dataset:
     X, y, g = [], [], []
     rep: dict[str, int] = {}
     for t, lab, shift in align_events(rec, events, L["offset_s"], L.get("max_shift_s", MAX_SHIFT_S)):
+        if is_excluded(lab):
+            continue
         r = rep.get(lab, 0)
         rep[lab] = r + 1
         centre = t + WIN_S / 2
@@ -136,15 +147,17 @@ def build(label_file: str | Path, verbose: bool = False) -> Dataset:
             print(f"  {lab:12s} powt.{r}  t={t:6.2f}s  (przesuniecie {shift:+.2f}s)")
         for k in sel:
             X.append(F[k]); y.append(lab); g.append(r)
-    for a, b, lab in intervals:
+    for a, b, lab in [iv for iv in intervals if not is_excluded(iv[2])]:
         a, b = a + L["offset_s"], b + L["offset_s"]
-        lead = 2.5 if lab.startswith("strobe") else WIN_S
+        lead = WIN_S
         sel = np.where((ts >= a + lead) & (ts <= b))[0][::2]
         r0 = rep.get(lab, 0)
         for n_, k in enumerate(sel):
             X.append(F[k]); y.append(lab); g.append((r0 + n_ * 3 // max(len(sel), 1)) % 3)
         rep[lab] = r0 + 1
-    return Dataset(np.vstack(X), np.array(y), np.array(g), np.array([label_file.stem] * len(y)), names)
+    # "person" w pliku znacznikow: ta sama osoba co w aplikacji (wazne dla uczciwego pomiaru miedzy osobami)
+    who = L.get("person") or label_file.stem
+    return Dataset(np.vstack(X), np.array(y), np.array(g), np.array([who] * len(y)), names)
 
 
 def label_files(folder: str | Path) -> list[Path]:
