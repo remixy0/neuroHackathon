@@ -151,7 +151,7 @@ def test_dispatch_menu_profile_when_no_game(store, bundle):
 def test_dispatch_unmapped_logged_not_sent(store, bundle):
     arc = FakeArcadeLink()
     hub = make_hub(store, bundle, arc)
-    entry = asyncio.run(hub.dispatch(1, "blink", 0.9, "eeg"))
+    entry = asyncio.run(hub.dispatch(1, "double_blink", 0.9, "eeg"))
     assert arc.presses == [] and entry["button"] is None and entry["sent"] is False
     assert len(hub.log) == 1
 
@@ -516,7 +516,7 @@ class CalPipeline(StubPipeline):
     def process(self, chunk):
         self.motion = {"n": chunk.shape[1], "vmax": [max(x, 0.0) for x in self.v],
                        "vmin": [min(x, 0.0) for x in self.v]}
-        p = {"rest": 0.9, "blink": 0.02, "jaw": 0.02, "frown": 0.02, **self.probs}
+        p = {"rest": 0.9, "double_blink": 0.02, "jaw": 0.02, "frown": 0.02, **self.probs}
         return [{"t": 10.0, "label": self.event or "rest", "confidence": 0.9, "event": self.event,
                  "contact_ok": True, "probs": p}]
 
@@ -552,7 +552,7 @@ async def feed(s, seconds, chunk_s=0.5):
 async def calibrate(s, head=100.0, face=None):
     """Cała kalibracja: ruchy głowy o szczycie `head` °/s, gesty twarzy o pewności z `face` (brak = nie widać)."""
     from backend.calibration import HEAD_AXIS
-    face = {"blink": 0.8, "jaw": 0.8} if face is None else face
+    face = {"double_blink": 0.8, "jaw": 0.8} if face is None else face
     await feed(s, 0.5)                                    # start (albo czekanie na swoją kolej)
     while s.cal.state == "running":
         step = s.cal.steps[s.cal.index]
@@ -595,7 +595,7 @@ def test_calibration_done_applies_thresholds_and_head_dps(store, bundle):
     asyncio.run(calibrate(s))                              # czoła nie widać
     assert s.cal.state == "done"
     thr = s.pipeline.thresholds
-    assert thr["jaw"] == pytest.approx(0.332) and thr["blink"] == pytest.approx(0.332)
+    assert thr["jaw"] == pytest.approx(0.332) and thr["double_blink"] == pytest.approx(0.332)
     assert thr["frown"] == DISABLED
     assert thr["look_left"] == store.data["thresholds"]["look_left"]      # niekalibrowane: z ustawień
     assert s.pipeline.head_dps == 40.0
@@ -619,9 +619,9 @@ def test_voice_prompts_in_order(store, bundle):
     s, hub = cal_session(store, bundle, voice=voice)
     asyncio.run(calibrate(s))
     assert voice.said[0] == "Gracz 1. Kalibracja. Usiądź spokojnie i patrz przed siebie."
-    assert voice.said[1:6] == ["Głowa w lewo.", "Głowa w prawo.", "Głowa w górę.", "Głowa w dół.", "Mrugnij."]
+    assert voice.said[1:6] == ["Głowa w lewo.", "Głowa w prawo.", "Głowa w górę.", "Głowa w dół.", "Mrugnij dwa razy."]
     assert len(voice.said) == 15
-    assert voice.said[-1].startswith("Gotowe.") and "czoło" in voice.said[-1] and "szczęka" not in voice.said[-1]
+    assert voice.said[-1].startswith("Gotowe.") and "czoło" in voice.said[-1] and "szczęka" not in voice.said[-1] and "mrugnięcie" not in voice.said[-1]
 
 
 def test_voice_setting_off_is_silent(store, bundle):

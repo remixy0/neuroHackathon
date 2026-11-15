@@ -2,7 +2,7 @@ import SwiftUI
 
 enum Labels {
     static let names: [String: String] = [
-        "rest": "Spoczynek", "blink": "Mrugnięcie",
+        "rest": "Spoczynek", "blink": "Mrugnięcie", "double_blink": "Podwójne mrugnięcie",
         "look_left": "Spojrzenie w lewo", "look_right": "Spojrzenie w prawo",
         "mouth_left": "Usta w lewo", "mouth_right": "Usta w prawo",
         "jaw": "Otwarcie szczęki", "head_left": "Głowa w lewo", "head_right": "Głowa w prawo",
@@ -12,7 +12,7 @@ enum Labels {
         "head": "Ruch głowy", "eyes": "Oczy", "face": "Mięśnie twarzy", "rest": "Spoczynek",
     ]
     static let symbols: [String: String] = [
-        "rest": "pause.circle", "blink": "eye.slash",
+        "rest": "pause.circle", "blink": "eye.slash", "double_blink": "eye.slash",
         "look_left": "arrow.left", "look_right": "arrow.right",
         "mouth_left": "mouth", "mouth_right": "mouth", "jaw": "mouth.fill",
         "head_left": "arrow.turn.up.left", "head_right": "arrow.turn.up.right",
@@ -21,7 +21,7 @@ enum Labels {
 
     /// Polecenia czytane na glos osobie w czepku
     static let commands: [String: String] = [
-        "rest": "Siedź spokojnie", "blink": "Mrugnij",
+        "rest": "Siedź spokojnie", "blink": "Mrugnij", "double_blink": "Mrugnij dwa razy",
         "look_left": "Spójrz w lewo", "look_right": "Spójrz w prawo",
         "mouth_left": "Usta w lewo", "mouth_right": "Usta w prawo",
         "jaw": "Otwórz szczękę", "head_left": "Obróć głowę w lewo", "head_right": "Obróć głowę w prawo",
@@ -30,7 +30,7 @@ enum Labels {
 
     /// Kafelki ekranu Trening, w grupach
     static let trainingGroups: [(title: String, family: String, keys: [String])] = [
-        ("Oczy", "eyes", ["blink", "look_left", "look_right"]),
+        ("Oczy", "eyes", ["double_blink", "look_left", "look_right"]),
         ("Twarz", "face", ["jaw", "frown"]),
         ("Głowa", "head", ["head_left", "head_right", "head_up", "head_down"]),
         ("Spoczynek (dłuższe nagranie)", "rest", ["rest"]),
@@ -56,7 +56,7 @@ enum Labels {
         let k = key.hasPrefix("?") ? String(key.dropFirst()) : key
         if families[k] != nil { return k }
         if k.hasPrefix("head") { return "head" }
-        if k.hasPrefix("look") || k.hasPrefix("eyes") || k == "blink" { return "eyes" }
+        if k.hasPrefix("look") || k.hasPrefix("eyes") || k.hasSuffix("blink") { return "eyes" }
         if k.hasPrefix("mouth") || k == "jaw" || k == "frown" { return "face" }
         return "rest"
     }

@@ -224,7 +224,7 @@
       <label class="check"><input type="checkbox" id="optCal"> Kalibracja na starcie sesji</label>
       <label class="check"><input type="checkbox" id="optVoice"> Polecenia głosem z tego komputera</label>
       <label class="check"><input type="checkbox" id="optRecord"> Zapis sesji na dysk</label>
-      <span class="gap-hint">Kalibracja trwa ok. 45 s: spokój, cztery ruchy głowy, po trzy mrugnięcia, otwarcia ust i zmarszczenia czoła. W tym czasie gesty nie idą do gry, a jej wynik ustawia progi tylko dla tej sesji. Zapis trafia do backend/recordings, ok. 2 MB na minutę na gracza.</span>
+      <span class="gap-hint">Kalibracja trwa ok. 45 s: spokój, cztery ruchy głowy, po trzy podwójne mrugnięcia, otwarcia ust i zmarszczenia czoła. W tym czasie gesty nie idą do gry, a jej wynik ustawia progi tylko dla tej sesji. Zapis trafia do backend/recordings, ok. 2 MB na minutę na gracza.</span>
     </div>
     <div class="bay" id="bay"></div>
     <div class="save-state" id="saveState" role="status"></div>
@@ -258,7 +258,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const GLYPH = { up: '▲', down: '▼', left: '◀', right: '▶', a: 'A', b: 'B', x: 'X', start: 'START', select: 'SELECT' };
 const BTN_PL = { up: 'w górę', down: 'w dół', left: 'w lewo', right: 'w prawo', a: 'A', b: 'B', x: 'X', start: 'START', select: 'SELECT' };
-const CLASS_ORDER = ['rest', 'head_left', 'head_right', 'head_up', 'head_down', 'jaw', 'frown', 'blink', 'look_left', 'look_right'];
+const CLASS_ORDER = ['rest', 'head_left', 'head_right', 'head_up', 'head_down', 'jaw', 'frown', 'double_blink', 'look_left', 'look_right'];
 const DURATIONS = [120, 300, 600, 1000];
 
 let info = null;          // /api/info
@@ -282,6 +282,7 @@ function renderBay() {
     const thr = settings.thresholds[g.id];
     const gyro = g.id.startsWith('head_');
     const rel = gyro ? 'z żyroskopu, próg pewności nie działa'
+      : !g.in_model ? 'nie ma jeszcze w modelu: nagraj sesje „Mrugnięcie ×2” i przetrenuj'
       : g.reliability != null ? `trafia u nowej osoby w ${Math.round(g.reliability * 100)}%` : 'brak pomiaru skuteczności';
     const slots = info.profiles.map((p) => {
       const e = settings.profiles[p.id][g.id];
@@ -446,7 +447,7 @@ function renderArcade() {
 // ---------------------------------------------------------------- gracze
 const lastEventId = { 1: null, 2: null };
 
-const FACE_SHORT = { blink: 'mrugnięcie', jaw: 'szczęka', frown: 'czoło' };
+const FACE_SHORT = { double_blink: 'podwójne mrugnięcie', jaw: 'szczęka', frown: 'czoło' };
 const num = (v, digits = 2) => Number(v).toFixed(digits).replace('.', ',');
 
 // przycisk w belce ekranu gracza (belka nie jest przerysowywana 5 razy na sekundę, więc kliknięcie nie ginie)

@@ -8,11 +8,12 @@ Older data (single-trial clips, `samples.jsonl` format) is archived elsewhere an
 | mode | what the person does | event labels |
 |---|---|---|
 | `eyes` | follows a yellow dot that moves only horizontally (jumps to a side and back + smooth sweeps) | `look_left`, `look_right`, `center`, `pursuit` |
-| `blink` | blinks once after each beep | `blink` |
+| `double_blink` | blinks twice quickly after each beep | `double_blink` |
+| `blink` | (until 15.11.2026) blinks once after each beep | `blink` |
 | `head` | turns / nods the head after a beep, holds, returns after a second beep | `head_left`, `head_right`, `head_up`, `head_down`, `center` |
 | `frown` | frowns / raises eyebrows after a beep, holds, relaxes after a second beep | `frown`, `relax` |
 | `jaw` | opens the mouth / jaw after a beep, holds, closes after a second beep | `jaw`, `relax` |
-| `keys` | no cues: blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S blink, A left, D right) | `blink`, `look_left`, `look_right` |
+| `keys` | no cues: double-blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S double blink, A left, D right) | `double_blink`, `look_left`, `look_right` |
 
 Every session starts with a quiet **baseline** (`baseline_start` .. `baseline_end`, label `rest`): the person
 sits still and looks at the centre. Time between trials is also "rest", but the person may blink or
@@ -37,7 +38,8 @@ between key presses is not reliable rest (unlabelled blinks / eye movements are 
   - `baseline` - quiet baseline, label `rest` (the only span that is reliably "nothing happens");
   - `instructed_hold` - from the GO cue to the return signal in modes head/frown/jaw: the person moves
     (after the reaction time) and holds the pose until `end`;
-  - `expected_response` - mode blink: 1.0 s after each cue, the blink is somewhere inside;
+  - `expected_response` - mode double_blink: 1.5 s after each cue, both blinks are inside (mode blink: 1.0 s,
+    one blink);
   - `dot_jump` - mode eyes: dot jumped to `x_to` and stays there until `end` (label `look_left`/`look_right`;
     `center` = dot back in the middle);
   - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`);

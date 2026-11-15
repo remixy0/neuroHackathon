@@ -8,7 +8,7 @@ HOP = 25          # jedno okno modelu co 0,1 s
 
 
 def out(probs=None, contact=True, t=10.0):
-    p = {"rest": 0.9, "blink": 0.02, "jaw": 0.02, "frown": 0.02}
+    p = {"rest": 0.9, "double_blink": 0.02, "jaw": 0.02, "frown": 0.02}
     p.update(probs or {})
     return {"t": t, "label": "rest", "confidence": 0.9, "event": None, "contact_ok": contact, "probs": p}
 
@@ -50,8 +50,8 @@ def run(cal, head=None, face=None, rest=None, contact=None):
 def test_plan_matches_spec():
     steps = C.plan()
     assert [s.key for s in steps] == ["rest", "head_left", "head_right", "head_up", "head_down",
-                                      "blink_1", "jaw_1", "frown_1", "blink_2", "jaw_2", "frown_2",
-                                      "blink_3", "jaw_3", "frown_3"]
+                                      "double_blink_1", "jaw_1", "frown_1", "double_blink_2", "jaw_2", "frown_2",
+                                      "double_blink_3", "jaw_3", "frown_3"]
     assert [s.seconds for s in steps] == [8.0] + [3.0] * 4 + [2.5] * 9
     assert sum(s.seconds for s in steps) == 42.5
     assert [s.kind for s in steps[:6]] == ["rest", "head", "head", "head", "head", "face"]
@@ -111,8 +111,8 @@ def test_gyro_wrong_direction_does_not_count():
 
 
 def test_face_threshold_formula():
-    r = run(C.Calibration(FS), rest={"blink": 0.10, "jaw": 0.02}, face={"blink": [0.80, 0.70, 0.90]})
-    g = r["gestures"]["blink"]
+    r = run(C.Calibration(FS), rest={"double_blink": 0.10, "jaw": 0.02}, face={"double_blink": [0.80, 0.70, 0.90]})
+    g = r["gestures"]["double_blink"]
     assert g["background"] == pytest.approx(0.10) and g["peak"] == pytest.approx(0.80)
     assert g["threshold"] == pytest.approx(0.38)               # 0,10 + 0,4 x (0,80 - 0,10)
     assert g["works"] is True and g["hits"] == 3 and g["trials"] == 3
@@ -125,12 +125,12 @@ def test_face_background_includes_other_face_steps():
     while cal.state == "running":
         step = cal.steps[cal.index]
         if step.gesture == "jaw":
-            feed_step(cal, probs={"jaw": 0.9, "blink": 0.30})
-        elif step.gesture == "blink":
-            feed_step(cal, peak_probs={"blink": 0.90})
+            feed_step(cal, probs={"jaw": 0.9, "double_blink": 0.30})
+        elif step.gesture == "double_blink":
+            feed_step(cal, peak_probs={"double_blink": 0.90})
         else:
             feed_step(cal)
-    g = cal.result["gestures"]["blink"]
+    g = cal.result["gestures"]["double_blink"]
     assert g["background"] == pytest.approx(0.30)
     assert g["threshold"] == pytest.approx(0.30 + 0.4 * 0.60)
 
@@ -144,25 +144,25 @@ def test_face_limits():
 
 def test_face_not_working_is_disabled():
     cal = C.Calibration(FS)
-    r = run(cal, rest={"frown": 0.20, "blink": 0.05},
+    r = run(cal, rest={"frown": 0.20, "double_blink": 0.05},
             face={"frown": [0.26, 0.25, 0.27],                 # szczyt 0,26 <= tło 0,20 + 0,08
-                  "blink": [0.90, 0.10, 0.08],                 # tylko 1 z 3 prób ponad progiem
+                  "double_blink": [0.90, 0.10, 0.08],                 # tylko 1 z 3 prób ponad progiem
                   "jaw": [0.7, 0.8, 0.9]})
     assert r["gestures"]["frown"]["works"] is False
-    assert r["gestures"]["blink"]["works"] is False and r["gestures"]["blink"]["hits"] <= 1
+    assert r["gestures"]["double_blink"]["works"] is False and r["gestures"]["double_blink"]["hits"] <= 1
     assert r["gestures"]["jaw"]["works"] is True
     thr = cal.thresholds()
-    assert thr["frown"] == C.DISABLED and thr["blink"] == C.DISABLED
+    assert thr["frown"] == C.DISABLED and thr["double_blink"] == C.DISABLED
     assert thr["jaw"] == pytest.approx(r["gestures"]["jaw"]["threshold"]) and thr["jaw"] < 1
 
 
 def test_face_without_contact_keeps_global():
     cal = C.Calibration(FS)
-    r = run(cal, face={"blink": [0.9, 0.9, 0.9], "jaw": [0.9, 0.9, 0.9]},
-            contact={"blink_1": False, "blink_2": False})      # mrugnięcie: tylko jedna próba z kontaktem
-    assert r["gestures"]["blink"]["works"] is None and r["gestures"]["blink"]["threshold"] is None
-    assert r["gestures"]["blink"]["trials"] == 1
-    assert "blink" not in cal.thresholds() and "jaw" in cal.thresholds()
+    r = run(cal, face={"double_blink": [0.9, 0.9, 0.9], "jaw": [0.9, 0.9, 0.9]},
+            contact={"double_blink_1": False, "double_blink_2": False})      # mrugnięcie: tylko jedna próba z kontaktem
+    assert r["gestures"]["double_blink"]["works"] is None and r["gestures"]["double_blink"]["threshold"] is None
+    assert r["gestures"]["double_blink"]["trials"] == 1
+    assert "double_blink" not in cal.thresholds() and "jaw" in cal.thresholds()
 
 
 def test_warmup_windows_ignored():
@@ -224,11 +224,11 @@ def test_face_spill_into_next_step_is_not_background():
         step = cal.steps[cal.index]
         n = int(round(step.seconds * FS)) // HOP
         for i in range(n):
-            late = step.gesture == "blink" and i >= n - 5
-            spill = prev == "blink" and i < 10
-            cal.feed(HOP, [0, 0], [0, 0], [out({"blink": 0.9} if late or spill else None)])
+            late = step.gesture == "double_blink" and i >= n - 5
+            spill = prev == "double_blink" and i < 10
+            cal.feed(HOP, [0, 0], [0, 0], [out({"double_blink": 0.9} if late or spill else None)])
         prev = step.gesture
-    g = cal.result["gestures"]["blink"]
+    g = cal.result["gestures"]["double_blink"]
     assert g["works"] is True and g["background"] < 0.1 and g["peak"] == pytest.approx(0.9)
     assert g["trials"] == 3 and g["hits"] == 3
 
@@ -241,9 +241,9 @@ def test_head_motion_spill_is_not_face_background():
         step = cal.steps[cal.index]
         n = int(round(step.seconds * FS)) // HOP
         for i in range(n):
-            if step.key == "blink_1" and i < 15:
+            if step.key == "double_blink_1" and i < 15:
                 p = {"jaw": 0.7, "frown": 0.7}
-            elif step.kind == "face" and step.gesture != "blink" and i == n // 2:
+            elif step.kind == "face" and step.gesture != "double_blink" and i == n // 2:
                 p = {step.gesture: 0.9}
             else:
                 p = None
@@ -254,5 +254,26 @@ def test_head_motion_spill_is_not_face_background():
 
 def test_spill_does_not_create_trial_without_own_data():
     cal = C.Calibration(FS)
-    run(cal, face={"blink": [0.9, 0.9, 0.9]}, contact={"blink_1": False, "blink_2": False})
-    assert cal.result["gestures"]["blink"]["trials"] == 1
+    run(cal, face={"double_blink": [0.9, 0.9, 0.9]}, contact={"double_blink_1": False, "double_blink_2": False})
+    assert cal.result["gestures"]["double_blink"]["trials"] == 1
+
+
+def test_gesture_missing_from_model_keeps_global():
+    # model sprzed nagrań podwójnego mrugnięcia nie ma tej klasy: brak danych, nie "nie działa"
+    cal = C.Calibration(FS)
+    cal.start()
+    while cal.state == "running":
+        step = cal.steps[cal.index]
+        n = int(round(step.seconds * FS)) // HOP
+        for i in range(n):
+            p = {"rest": 0.9, "jaw": 0.9 if step.gesture == "jaw" and i == n // 2 else 0.02, "frown": 0.02}
+            cal.feed(HOP, [0, 0], [0, 0], [{"t": 10.0, "label": "rest", "confidence": 0.9, "event": None,
+                                            "contact_ok": True, "probs": p}])
+    g = cal.result["gestures"]["double_blink"]
+    assert g["works"] is None and g["trials"] == 0
+    assert "double_blink" not in cal.thresholds() and cal.result["gestures"]["jaw"]["works"] is True
+
+
+def test_double_blink_prompt():
+    steps = {s.key: s for s in C.plan()}
+    assert steps["double_blink_1"].say == "Mrugnij dwa razy." and steps["double_blink_1"].title == "Mrugnij dwa razy"

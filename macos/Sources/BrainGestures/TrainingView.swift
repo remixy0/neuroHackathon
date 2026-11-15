@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Ekran Trening: osobna sesja dla kazdej kategorii ruchu (oczy, mruganie, glowa, czolo, szczeka) + emocje.
+/// Ekran Trening: osobna sesja dla kazdej kategorii ruchu (oczy, podwojne mrugniecie, glowa, czolo, szczeka,
+/// klawiatura) + emocje.
 /// Sesja nagrywa ciagly surowy sygnal i czas kazdego bodzca do tools/training/sessions/ (opis: training/README.md).
 struct TrainingView: View {
     @EnvironmentObject var hub: Hub
@@ -46,6 +47,7 @@ struct TrainingView: View {
             Spacer(minLength: 0)
         }
         .padding(16)
+        .onAppear { if tab == "blink" { tab = TrainMode.doubleBlink.rawValue } }   // tryb pojedynczego mrugniecia usuniety
     }
 }
 
@@ -302,7 +304,7 @@ private struct KeyItem: Identifiable {
     var id: String { label }
 
     static let all = [
-        KeyItem(keys: ["W", "S"], label: "blink", title: "Mrugnięcie", symbol: "eye.slash"),
+        KeyItem(keys: ["W", "S"], label: "double_blink", title: "Podwójne mrugnięcie", symbol: "eye.slash"),
         KeyItem(keys: ["A"], label: "look_left", title: "Spojrzenie w lewo", symbol: "arrow.left"),
         KeyItem(keys: ["D"], label: "look_right", title: "Spojrzenie w prawo", symbol: "arrow.right"),
     ]

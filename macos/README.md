@@ -50,11 +50,11 @@ Start; resztę prowadzi aplikacja głosem i dźwiękami na czarnej planszy na ca
 | Tryb | Co robi osoba | Etykiety w danych |
 |---|---|---|
 | **Oczy** | śledzi wzrokiem żółtą kropkę, która porusza się tylko w poziomie: skacze w bok (różna odległość) i wraca na środek, a co jakiś czas płynnie przejeżdża od krawędzi do krawędzi | `look_left`, `look_right`, `center`, `pursuit` |
-| **Mruganie** | patrzy na krzyżyk i mruga raz po każdym piknięciu (co 2,5–4,5 s, losowo) | `blink` |
+| **Mrugnięcie ×2** | patrzy na krzyżyk i mruga dwa razy szybko po każdym piknięciu (co 3–5 s, losowo) | `double_blink` |
 | **Głowa** | widzi i słyszy kierunek, na piknięcie obraca/pochyla głowę i trzyma 1,5 s, na drugi dźwięk wraca; lewo/prawo/góra/dół po równo w losowej kolejności | `head_left`, `head_right`, `head_up`, `head_down` |
 | **Czoło** | na piknięcie marszczy czoło i trzyma 2 s, na drugi dźwięk rozluźnia | `frown` |
 | **Szczęka** | na piknięcie otwiera szeroko usta i trzyma 1,5 s, na drugi dźwięk zamyka | `jaw` |
-| **Klawiatura** | bez poleceń: sama mruga i patrzy w boki we własnym rytmie, a każdy gest od razu oznacza klawiszem — W lub S = mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo | `blink`, `look_left`, `look_right` |
+| **Klawiatura** | bez poleceń: sama mruga i patrzy w boki we własnym rytmie, a każdy gest od razu oznacza klawiszem — W lub S = podwójne mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo | `double_blink`, `look_left`, `look_right` |
 
 Każda sesja zaczyna się od instrukcji czytanej na głos i 10 s spokoju (tło). Tryb „Emocje” jest
 osobną zakładką i zapisuje dane po swojemu (opis w `tools/README.md`).

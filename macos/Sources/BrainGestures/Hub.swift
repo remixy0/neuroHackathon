@@ -4,13 +4,14 @@ import SwiftUI
 /// Tryby treningu: kazda kategoria ruchu ma wlasna sesje. Sesja = ciagly zapis surowego sygnalu czepka
 /// + znaczniki czasu kazdego bodzca (silnik: tools/session_recorder.py -> training/sessions/).
 enum TrainMode: String, CaseIterable, Identifiable {
-    case eyes, blink, head, frown, jaw, keys
+    // podwojne mrugniecie zastapilo pojedyncze (15.11.2026): mrugniecie raz jest mimowolne, nie nadaje sie na gest
+    case eyes, doubleBlink = "double_blink", head, frown, jaw, keys
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .eyes: return "Oczy"
-        case .blink: return "Mruganie"
+        case .doubleBlink: return "Mrugnięcie ×2"
         case .head: return "Głowa"
         case .frown: return "Czoło"
         case .jaw: return "Szczęka"
@@ -21,7 +22,7 @@ enum TrainMode: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .eyes: return "eye"
-        case .blink: return "eye.slash"
+        case .doubleBlink: return "eye.slash"
         case .head: return "arrow.up.and.down.and.arrow.left.and.right"
         case .frown: return "eyebrow"
         case .jaw: return "mouth.fill"
@@ -31,7 +32,7 @@ enum TrainMode: String, CaseIterable, Identifiable {
 
     var family: String {
         switch self {
-        case .eyes, .blink, .keys: return "eyes"
+        case .eyes, .doubleBlink, .keys: return "eyes"
         case .head: return "head"
         case .frown, .jaw: return "face"
         }
@@ -45,8 +46,9 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .eyes:
             return "Patrz na żółtą kropkę i podążaj za nią samym wzrokiem. Głowa nieruchomo. "
                 + "Kropka skacze w bok i wraca albo płynnie jeździ. Mrugaj najlepiej wtedy, gdy kropka stoi na środku."
-        case .blink:
-            return "Patrz na krzyżyk. Po każdym sygnale mrugnij raz, wyraźnie. Między sygnałami staraj się nie mrugać."
+        case .doubleBlink:
+            return "Patrz na krzyżyk. Po każdym sygnale mrugnij dwa razy, szybko i wyraźnie. "
+                + "Między sygnałami staraj się nie mrugać."
         case .head:
             return "Najpierw zobaczysz i usłyszysz kierunek. Na sygnał obróć albo pochyl głowę w tę stronę i zostań tak. "
                 + "Na drugi sygnał wróć głową do środka."
@@ -55,7 +57,7 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .jaw:
             return "Na sygnał szeroko otwórz usta, opuść szczękę i trzymaj. Na drugi sygnał zamknij usta i rozluźnij."
         case .keys:
-            return "Tu nie ma poleceń, sam decydujesz, kiedy robisz gest. Mrugnij raz i od razu wciśnij W albo S. "
+            return "Tu nie ma poleceń, sam decydujesz, kiedy robisz gest. Mrugnij dwa razy szybko i od razu wciśnij W albo S. "
                 + "Spójrz w lewo i wciśnij A, spójrz w prawo i wciśnij D, potem wróć wzrokiem na krzyżyk. "
                 + "Klawisz naciskaj razem z gestem. Między gestami patrz spokojnie na krzyżyk. Escape kończy sesję."
         }
@@ -67,8 +69,9 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .eyes:
             return "Kropka jeździ tylko na boki: skacze w lewo lub w prawo (różna odległość) i wraca na środek, "
                 + "a co jakiś czas płynnie przejeżdża od krawędzi do krawędzi. Pozycja kropki zapisuje się dla każdej próbki sygnału."
-        case .blink:
-            return "Krzyżyk na środku i piknięcie co 2,5–4,5 s (losowo). Na każde piknięcie — jedno wyraźne mrugnięcie."
+        case .doubleBlink:
+            return "Krzyżyk na środku i piknięcie co 3–5 s (losowo). Na każde piknięcie — dwa szybkie, wyraźne "
+                + "mrugnięcia. Podwójne mrugnięcie zastąpiło pojedyncze: zwykłe mrugnięcie zdarza się samo i nie jest gestem."
         case .head:
             return "Kierunek (strzałka + głos), po chwili piknięcie = ruch głowy i przytrzymanie 1,5 s, drugi dźwięk = powrót. "
                 + "Lewo, prawo, góra, dół po równo, w losowej kolejności."
@@ -77,22 +80,22 @@ enum TrainMode: String, CaseIterable, Identifiable {
         case .jaw:
             return "Piknięcie = otwórz szeroko usta i trzymaj 1,5 s, drugi dźwięk = zamknij. Przerwy 2,5–4 s."
         case .keys:
-            return "Bez poleceń: osoba w czepku sama mruga i patrzy w boki, a każdy gest od razu oznacza klawiszem — "
-                + "W lub S = mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo. Klawisz razem z gestem "
+            return "Bez poleceń: osoba w czepku sama mruga podwójnie i patrzy w boki, a każdy gest od razu oznacza klawiszem — "
+                + "W lub S = podwójne mrugnięcie, A = spojrzenie w lewo, D = spojrzenie w prawo. Klawisz razem z gestem "
                 + "(tuż przed albo tuż po), gesty co 2–3 s, każdego mniej więcej tyle samo."
         }
     }
 
     /// Tryb klawiatury: kod klawisza (uklad fizyczny, jak WASD w grach) -> (etykieta, litera).
     static let keyLabels: [UInt16: (label: String, key: String)] = [
-        13: ("blink", "W"), 1: ("blink", "S"), 0: ("look_left", "A"), 2: ("look_right", "D"),
+        13: ("double_blink", "W"), 1: ("double_blink", "S"), 0: ("look_left", "A"), 2: ("look_right", "D"),
     ]
     static let escapeKeyCode: UInt16 = 53
 }
 
 /// Tryb klawiatury: ostatni oznaczony gest (informacja zwrotna na planszy).
 struct KeyMark: Equatable {
-    let label: String             // blink / look_left / look_right; "wait" = klawisz w czasie spoczynku
+    let label: String             // double_blink / look_left / look_right; "wait" = klawisz w czasie spoczynku
     let key: String
     let at: Date
 }
@@ -279,8 +282,8 @@ final class Hub: ObservableObject {
                 if let id { let mm = CGDisplayScreenSize(id); screen["screen_mm"] = [mm.width, mm.height] }
             }
             p["screen"] = screen
-        case .blink:
-            p["interval_s"] = [2.5, 4.5]
+        case .doubleBlink:
+            p["interval_s"] = [3.0, 5.0]
         case .head:
             p["pause_s"] = [1.5, 2.5]; p["announce_to_cue_s"] = 1.2; p["hold_s"] = 1.5; p["after_return_s"] = 1.0
             p["order"] = "balanced: each round the 4 directions in random order"
@@ -289,7 +292,8 @@ final class Hub: ObservableObject {
         case .jaw:
             p["pause_s"] = [2.5, 4.0]; p["hold_s"] = 1.5
         case .keys:
-            p["keys"] = ["W": "blink", "S": "blink", "A": "look_left", "D": "look_right", "Escape": "end of session"]
+            p["keys"] = ["W": "double_blink", "S": "double_blink", "A": "look_left", "D": "look_right",
+                         "Escape": "end of session"]
             p["key_codes"] = "physical keys (macOS virtual key codes 13 W, 1 S, 0 A, 2 D), independent of layout"
             p["key_time"] = "unix_time of a 'key' event = NSEvent key-down timestamp (system uptime) converted to "
                 + "the computer clock; key repeats (key held down) are ignored"
@@ -340,7 +344,7 @@ final class Hub: ObservableObject {
 
         switch mode {
         case .eyes: await runEyes()
-        case .blink: await runBlink()
+        case .doubleBlink: await runDoubleBlink()
         case .head: await runHead()
         case .frown: await runHold(label: "frown", now: "ZMARSZCZ CZOŁO", relax: "Rozluźnij", hold: 2.0)
         case .jaw: await runHold(label: "jaw", now: "OTWÓRZ USTA", relax: "Zamknij i rozluźnij", hold: 1.5)
@@ -433,18 +437,18 @@ final class Hub: ObservableObject {
     }
 
     @MainActor
-    private func runBlink() async {
+    private func runDoubleBlink() async {
         var trial = 0
-        run?.phase = "Mrugnij raz po każdym piknięciu"
+        run?.phase = "Mrugnij dwa razy po każdym piknięciu"
         while timeLeft {
             run?.display = .fixation
-            guard await wait(Double.random(in: 2.5...4.5)), timeLeft else { return }
+            guard await wait(Double.random(in: 3.0...5.0)), timeLeft else { return }
             trial += 1
             let t = Date()
-            event("cue", label: "blink", trial: trial, details: ["sound": "Tink"], at: t)
+            event("cue", label: "double_blink", trial: trial, details: ["sound": "Tink"], at: t)
             cueSound()
             run?.flash = t
-            count("blink")
+            count("double_blink")
         }
     }
 

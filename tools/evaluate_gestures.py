@@ -63,7 +63,7 @@ def show_cv(how: str, m: dict, W, P) -> None:
         print("  osoby: " + ", ".join(f"{p} {np.mean(v) * 100:.0f}%" for p, v in sorted(by.items())))
 
 
-EYE_CLASSES = ("blink", "look_left", "look_right")
+EYE_CLASSES = ("double_blink", "blink", "look_left", "look_right")
 
 
 def by_mode(sessions) -> dict[str, list[str]]:

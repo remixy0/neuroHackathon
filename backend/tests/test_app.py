@@ -244,10 +244,10 @@ def test_put_settings_roundtrip(tmp_path, bundle):
     app, arc = make(tmp_path, bundle)
     with TestClient(app) as c:
         data = c.get("/api/settings").json()
-        data["profiles"]["runner"]["blink"] = {"button": "up", "ms": 150}
+        data["profiles"]["runner"]["double_blink"] = {"button": "up", "ms": 150}
         data["arcade_url"] = "ws://10.1.1.1:8787"
         assert c.put("/api/settings", json=data).status_code == 200
-        assert c.get("/api/settings").json()["profiles"]["runner"]["blink"] == {"button": "up", "ms": 150}
+        assert c.get("/api/settings").json()["profiles"]["runner"]["double_blink"] == {"button": "up", "ms": 150}
         assert arc.url == "ws://10.1.1.1:8787"
 
 
@@ -354,3 +354,12 @@ def test_busy_player_rejection_leaves_no_recording(tmp_path, bundle):
                 ws2.send_json(hello_eeg(sid=SID2))
                 assert ws2.receive_json()["code"] == "player_busy"
     assert len(list((tmp_path / "rec").iterdir())) == 1
+
+
+def test_api_info_marks_gestures_missing_from_model(tmp_path, bundle):
+    app, _ = make(tmp_path, bundle)
+    with TestClient(app) as c:
+        g = {x["id"]: x for x in c.get("/api/info").json()["gestures"]}
+    assert "blink" not in g and "double_blink" in g
+    assert g["jaw"]["in_model"] is True
+    assert g["double_blink"]["in_model"] is ("double_blink" in bundle["classes"])

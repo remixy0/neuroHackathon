@@ -41,6 +41,8 @@ CROSS_DEG = 10.0
 ANGLE_LEAK_S = 20.0    # kat glowy wraca do 0 z ta stala czasu (dryf zyroskopu)
 RETURN_LOOK_S = 2.5    # oczy: pozycji nie znamy (dryf Fp), wiec po "w lewo" przez 2,5 s bez "w prawo" i odwrotnie
 OPPOSITE_LOOK = {"look_left": "look_right", "look_right": "look_left"}
+# Klasy modelu, ktore nie sa gestami: pojedyncze mrugniecie (mruga sie mimowolnie) - gestem jest podwojne.
+SILENT = frozenset({"blink"})
 
 
 class GestureRecognizer:
@@ -156,7 +158,8 @@ class GestureRecognizer:
         k = int(ps.argmax())
         label = self.classes[k]
         event = None
-        if ok and t >= self.warmup_s and label != "rest" and ps[k] >= self.thresholds.get(label, self.threshold):
+        if (ok and t >= self.warmup_s and label != "rest" and label not in SILENT
+                and ps[k] >= self.thresholds.get(label, self.threshold)):
             same = t - self.last_event.get(label, -1e9) < self.refractory_s
             back = self._is_return(label, t)
             if not same and not back:

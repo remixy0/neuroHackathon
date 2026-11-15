@@ -12,12 +12,15 @@ from pathlib import Path
 
 from .protocol import BUTTONS
 
-GESTURES = ["head_left", "head_right", "head_up", "head_down", "jaw", "frown", "blink", "look_left", "look_right"]
+GESTURES = ["head_left", "head_right", "head_up", "head_down", "jaw", "frown", "double_blink", "look_left",
+            "look_right"]
+# dawne gesty w starych plikach ustawień -> gest, który je zastąpił (przycisk przechodzi, próg nie: inny ruch)
+LEGACY = {"blink": "double_blink"}
 PROFILES = ["menu", "tetris", "pong", "runner"]
 GESTURE_PL = {
     "head_left": "Głowa w lewo", "head_right": "Głowa w prawo", "head_up": "Głowa w górę",
     "head_down": "Głowa w dół", "jaw": "Zaciśnięcie szczęki", "frown": "Zmarszczenie czoła",
-    "blink": "Mrugnięcie", "look_left": "Spojrzenie w lewo", "look_right": "Spojrzenie w prawo",
+    "double_blink": "Podwójne mrugnięcie", "look_left": "Spojrzenie w lewo", "look_right": "Spojrzenie w prawo",
 }
 PROFILE_PL = {"menu": "Menu", "tetris": "Tetris", "pong": "Pong", "runner": "Runner"}
 DEFAULT_ARCADE_URL = "ws://localhost:8787"
@@ -116,6 +119,7 @@ def validate(data: dict, defaults: dict) -> dict:
     thr = data.get("thresholds", {})
     if not isinstance(thr, dict):
         raise ValueError("thresholds musi być obiektem")
+    thr = {g: v for g, v in thr.items() if g not in LEGACY}
     for g, v in thr.items():
         if g not in GESTURES:
             raise ValueError(f"nieznany gest {g!r}")
@@ -131,6 +135,11 @@ def validate(data: dict, defaults: dict) -> dict:
             raise ValueError(f"nieznany profil {p!r}")
         if not isinstance(mapping, dict):
             raise ValueError(f"profil {p} musi być obiektem")
+        mapping = dict(mapping)
+        for old, new in LEGACY.items():
+            if old in mapping:
+                mapping.setdefault(new, mapping[old])
+                del mapping[old]
         for g, entry in mapping.items():
             if g not in GESTURES:
                 raise ValueError(f"nieznany gest {g!r}")

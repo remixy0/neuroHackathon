@@ -243,9 +243,11 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
     async def info(request: Request):
         port = request.url.port or int(os.environ.get("PORT", 8000))
         thr = bundle.get("thresholds") or {}
+        classes = {str(c) for c in bundle.get("classes", [])}
         return {
             "gestures": [{"id": g, "name": GESTURE_PL[g], "reliability": rel.get(g),
-                          "model_threshold": round(float(thr.get(g, 0.5)), 3)} for g in GESTURES],
+                          "model_threshold": round(float(thr.get(g, 0.5)), 3),
+                          "in_model": g in classes} for g in GESTURES],
             "profiles": [{"id": p, "name": PROFILE_PL[p]} for p in PROFILES],
             "buttons": list(P.BUTTONS),
             "phone_urls": [f"ws://{ip}:{port}/ws/controller" for ip in lan_ips()]

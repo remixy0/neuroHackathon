@@ -30,7 +30,7 @@ TOOLS = Path(__file__).resolve().parent.parent / "tools"
 MAX_QUEUE_SAMPLES = 500     # ~2 s danych czekających na analizę; więcej = wyrzucamy stare i zaczynamy od nowa
 STALE_S = 1.0               # gest z danych starszych niż tyle sekund nie jest wykonywany
 LOG_SIZE = 60
-SPOKEN = {"blink": "mrugnięcie", "jaw": "szczęka", "frown": "czoło"}    # wyłączone gesty w komunikacie głosowym
+SPOKEN = {"double_blink": "podwójne mrugnięcie", "jaw": "szczęka", "frown": "czoło"}   # wyłączone gesty w komunikacie
 # Telefon po zerwaniu połączenia łączy się sam w kilka sekund: ta sama opaska tego samego gracza wracająca
 # w tym czasie zachowuje wynik kalibracji (albo jej pominięcie) zamiast 45 s kalibracji w środku gry.
 KEEP_CALIBRATION_S = 30.0

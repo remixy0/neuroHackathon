@@ -29,6 +29,8 @@ FORMAT = "braingestures-session/1"
 PRE_ROLL_S = 2.0   # tyle sekund sygnalu sprzed startu sesji dopisujemy na poczatek (rozbieg filtrow)
 # tryb klawiatury: odcinek key_press = od 0,8 s przed do 0,5 s po klawiszu - tam zaczyna sie oznaczony ruch
 KEY_SPAN_S = (0.8, 0.5)
+# tryb podwojnego mrugniecia: odcinek expected_response po sygnale (oba mrugniecia w srodku)
+DOUBLE_RESPONSE_S = 1.5
 
 CHANNEL_INFO: dict[str, tuple[str, str, str]] = {
     "O1": ("eeg", "uV", "EEG electrode O1 (10-20 system), left occipital (back of head). Raw, unfiltered, large DC offset."),
@@ -64,8 +66,18 @@ MODES: dict[str, dict] = {
             "(smooth pursuit, label pursuit). Every movement is a 'stim_move' event with start time, x_from, x_to, "
             "duration_s and easing; stimulus.csv gives the exact dot position for every EEG sample."),
     },
+    "double_blink": {
+        "title_pl": "Podwojne mrugniecie",
+        "labels": ["double_blink"],
+        "paradigm": (
+            "Fixation cross on a black screen. At random intervals a short beep sounds and the cross flashes "
+            "('cue' event, label double_blink): the person blinks TWICE in quick succession (two clear blinks "
+            "within ~0.6 s) right after the beep, and tries not to blink between beeps. The first blink follows the "
+            "cue by a reaction time of ~0.2-0.6 s. Replaces mode 'blink' from 15.11.2026: a single blink is "
+            "involuntary and is not used as a gesture."),
+    },
     "blink": {
-        "title_pl": "Mruganie",
+        "title_pl": "Mruganie (do 15.11.2026)",
         "labels": ["blink"],
         "paradigm": (
             "Fixation cross on a black screen. At random intervals a short beep sounds and the cross flashes "
@@ -102,11 +114,12 @@ MODES: dict[str, dict] = {
     },
     "keys": {
         "title_pl": "Klawiatura - mrugniecia i spojrzenia",
-        "labels": ["blink", "look_left", "look_right"],
+        "labels": ["double_blink", "look_left", "look_right"],
         "paradigm": (
             "Self-paced, no cues. Fixation cross on a black screen. The person wearing the headset performs eye "
             "gestures in their own rhythm and labels each one on the keyboard at the same moment: W or S = blink "
-            "(label blink), A = look to the LEFT and back to the centre (label look_left), D = look to the RIGHT "
+            "TWICE quickly (label double_blink; sessions recorded before 15.11.2026 used W/S for a single blink, "
+            "label blink), A = look to the LEFT and back to the centre (label look_left), D = look to the RIGHT "
             "and back (label look_right). Every key press is a 'key' event (details.key = the key, unix_time = "
             "the OS key-down timestamp, same clock as the samples). The key falls roughly at the same time as the "
             "movement - before or after it by up to a few hundred ms - so the movement onset has to be found in "
@@ -126,7 +139,7 @@ EVENT_TYPES = {
     "return": "Second signal: return to neutral / relax (label center or relax).",
     "stim_move": "Dot starts moving: from x to x_to over duration_s (easing in details).",
     "key": "Mode keys: the person pressed a key to label the gesture they are doing now (label; details.key "
-           "W/S = blink, A = look_left, D = look_right). unix_time = OS key-down timestamp.",
+           "W/S = double_blink, A = look_left, D = look_right). unix_time = OS key-down timestamp.",
     "pause": "Session paused by the operator.",
     "resume": "Session resumed.",
     "session_end": "Last event of the session.",
@@ -142,11 +155,12 @@ Older data (single-trial clips, `samples.jsonl` format) is archived elsewhere an
 | mode | what the person does | event labels |
 |---|---|---|
 | `eyes` | follows a yellow dot that moves only horizontally (jumps to a side and back + smooth sweeps) | `look_left`, `look_right`, `center`, `pursuit` |
-| `blink` | blinks once after each beep | `blink` |
+| `double_blink` | blinks twice quickly after each beep | `double_blink` |
+| `blink` | (until 15.11.2026) blinks once after each beep | `blink` |
 | `head` | turns / nods the head after a beep, holds, returns after a second beep | `head_left`, `head_right`, `head_up`, `head_down`, `center` |
 | `frown` | frowns / raises eyebrows after a beep, holds, relaxes after a second beep | `frown`, `relax` |
 | `jaw` | opens the mouth / jaw after a beep, holds, closes after a second beep | `jaw`, `relax` |
-| `keys` | no cues: blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S blink, A left, D right) | `blink`, `look_left`, `look_right` |
+| `keys` | no cues: double-blinks and looks left/right in their own rhythm and labels each gesture on the keyboard (W/S double blink, A left, D right) | `double_blink`, `look_left`, `look_right` |
 
 Every session starts with a quiet **baseline** (`baseline_start` .. `baseline_end`, label `rest`): the person
 sits still and looks at the centre. Time between trials is also "rest", but the person may blink or
@@ -171,7 +185,8 @@ between key presses is not reliable rest (unlabelled blinks / eye movements are 
   - `baseline` - quiet baseline, label `rest` (the only span that is reliably "nothing happens");
   - `instructed_hold` - from the GO cue to the return signal in modes head/frown/jaw: the person moves
     (after the reaction time) and holds the pose until `end`;
-  - `expected_response` - mode blink: 1.0 s after each cue, the blink is somewhere inside;
+  - `expected_response` - mode double_blink: 1.5 s after each cue, both blinks are inside (mode blink: 1.0 s,
+    one blink);
   - `dot_jump` - mode eyes: dot jumped to `x_to` and stays there until `end` (label `look_left`/`look_right`;
     `center` = dot back in the middle);
   - `dot_sweep` - mode eyes: dot glides from `x_from` to `x_to` (label `pursuit`);
@@ -387,8 +402,9 @@ class SessionRecorder:
                 add(base, e["sample"], "rest", "baseline")
                 base = None
             elif k == "cue":
-                if self.meta.get("mode") == "blink":
-                    add(e["sample"], e["sample"] + int(1.0 * fs), e["label"], "expected_response", e["trial"])
+                if self.meta.get("mode") in ("blink", "double_blink"):
+                    span = DOUBLE_RESPONSE_S if self.meta.get("mode") == "double_blink" else 1.0
+                    add(e["sample"], e["sample"] + int(span * fs), e["label"], "expected_response", e["trial"])
                 else:
                     open_cue = e
             elif k == "return" and open_cue is not None:

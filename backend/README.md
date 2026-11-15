@@ -57,6 +57,9 @@ tego samego kierunku mogą przepaść.
   | żyroskop 60°/s | 0,02 s | 3 | 5 | 0,3 / min |
 
   Progi pewności głowy w tabeli nie działają. Dawne pole `head_gyro` w `settings.json` jest pomijane.
+  Powrót po małym, szybkim ruchu (poniżej 12°, typowym w grze) też nie jest gestem: pierwszy ruch w przeciwną
+  stronę do 6 s po geście to powrót, chyba że głowa minie środek o 20°. Na nagraniach powroty zgłoszone jako gest:
+  przy 40°/s 9 → 4, przy 30°/s 12 → 7 (na 284 ruchy), bez utraty trafionych gestów.
 - **Wyciszanie twarzy przy ruchu głowy** (domyślnie 1,5 s po ruchu szybszym niż 30°/s; 0 s wyłącza): ruch głowy
   przesuwa elektrody i model widzi wtedy szczękę albo czoło, więc gest twarzy lub oczu z modelu jest w tym czasie
   pomijany. Na nagraniach: fałszywe gesty twarzy w sesjach głowy 5,6 → 2,2 na minutę, trafione gesty twarzy
@@ -79,9 +82,14 @@ Domyślnie:
 | głowa w dół | ▼ | szybsze opadanie (400 ms) | paletka w dół (300 ms) | ślizg |
 | zaciśnięcie szczęki | A (zatwierdź) | A (upuść) | – | A (skok) |
 | zmarszczenie czoła | B (wstecz) | B (obrót w lewo) | – | B (ślizg) |
-| mrugnięcie, spojrzenia | – | – | – | – |
+| podwójne mrugnięcie, spojrzenia | – | – | – | – |
 
-Mrugnięcie i spojrzenia są wyłączone, bo u nowej osoby model trafia je w 50–68% (ruchy głowy ~98%).
+Spojrzenia są domyślnie wyłączone, bo u nowej osoby model trafia je w 61–68% (ruchy głowy ~98%).
+**Podwójne mrugnięcie** zastąpiło pojedyncze (15.11.2026): zwykłe mrugnięcie zdarza się samo, więc nie jest gestem
+(model zna je nadal, żeby odróżniać od podwójnego). Podwójne działa dopiero, gdy model się go nauczy: nagraj
+w aplikacji sesje „Mrugnięcie ×2” albo „Klawiatura” (W/S) i uruchom `tools/train_gestures.py`. Do tego czasu
+strona pisze przy nim „nie ma jeszcze w modelu”. Stary `settings.json` z przyciskiem dla mrugnięcia przenosi go
+na podwójne mrugnięcie (próg nie przechodzi).
 
 ## Kalibracja
 
@@ -92,7 +100,7 @@ nie idą do gry.
 1. **Spokój, 8 s** — tło żyroskopu i EEG osoby.
 2. **Głowa w lewo, w prawo, w górę, w dół, po 3 s** — próg żyroskopu osoby = 0,4 × mediana szczytowych prędkości,
    w granicach 25–120°/s. Liczy się tylko ruch we właściwą stronę; mniej niż 3 wyraźne ruchy → próg z ustawień.
-3. **Mrugnięcie, otwarcie ust, zmarszczenie czoła, po 3 razy na przemian, po 2,5 s** — dla każdego gestu: tło =
+3. **Podwójne mrugnięcie, otwarcie ust, zmarszczenie czoła, po 3 razy na przemian, po 2,5 s** — dla każdego gestu: tło =
    kwantyl 0,95 jego pewności w spokoju i w krokach pozostałych gestów twarzy, szczyt = mediana maksimów w jego
    krokach, próg = tło + 0,4 × (szczyt − tło) w granicach 0,15–0,95. Gest działa, gdy szczyt > tło + 0,08
    i co najmniej 2 próby przekraczają próg; gest, który nie działa, jest wyłączony do końca sesji. Okna bez

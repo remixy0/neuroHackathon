@@ -15,12 +15,14 @@ import numpy as np
 TOOLS = Path(__file__).resolve().parent.parent
 TRAIN_DIR = Path(os.environ.get("BRAINGESTURES_TRAIN_DIR", TOOLS / "training"))  # jak neuro/appdata.py
 
-# gesty, ktore model rozpoznaje (kolejnosc = kolejnosc klas w modelu)
-CLASSES = ["rest", "blink", "look_left", "look_right", "frown", "jaw",
+# gesty, ktore model rozpoznaje (kolejnosc = kolejnosc klas w modelu). "blink" (pojedyncze mrugniecie, stare
+# nagrania z trybu mrugania) zostaje jako klasa, zeby model odroznial je od podwojnego, ale nie jest zglaszane
+# jako gest (recognizer.SILENT) - gestem jest "double_blink".
+CLASSES = ["rest", "blink", "double_blink", "look_left", "look_right", "frown", "jaw",
            "head_left", "head_right", "head_up", "head_down"]
 
 LABELS_PL = {
-    "rest": "spoczynek", "blink": "mrugniecie", "look_left": "spojrzenie w lewo",
+    "rest": "spoczynek", "blink": "mrugniecie", "double_blink": "podwojne mrugniecie", "look_left": "spojrzenie w lewo",
     "look_right": "spojrzenie w prawo", "frown": "zmarszczenie czola", "jaw": "szczeka",
     "head_left": "glowa w lewo", "head_right": "glowa w prawo", "head_up": "glowa w gore",
     "head_down": "glowa w dol",

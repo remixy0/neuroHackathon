@@ -30,6 +30,8 @@ from .recognizer import BASELINE_S, HOP_S, MIN_BASELINE_S
 from .sessions import Session
 
 EVENT_OFFSETS = (0.5, 0.75, 1.0, 1.25)   # koniec okna wzgledem poczatku ruchu [s]
+# podwojne mrugniecie: okno musi objac oba mrugniecia (drugie do 0,8 s po pierwszym), ale nie zaczynac sie po pierwszym
+OFFSETS_BY_LABEL = {"double_blink": (0.8, 1.0, 1.2, 1.4)}
 HOLD_LABELS = ("frown", "jaw")           # gesty trzymane: napiecie miesni trwa do sygnalu powrotu
 HOLD_FROM_S, HOLD_STEP_S = 1.5, 0.25
 AFTER_END_S = 0.2        # okna gestu koncza sie najpozniej tyle po sygnale powrotu (potem zaczyna sie powrot)
@@ -120,7 +122,7 @@ def session_rows(s: Session, names: list[str] | None = None
             held = kind != "expected_response"     # po odcinku nastepuje powrot / rozluznienie
             onset, weak = detect_onset(sig, label, a, b + int(ONSET_AFTER_END_S * fs) if held else n, fs)
             last = b + int(AFTER_END_S * fs) if held else n
-            for off in EVENT_OFFSETS:
+            for off in OFFSETS_BY_LABEL.get(label, EVENT_OFFSETS):
                 end = onset + int(round(off * fs))
                 if end <= last:
                     add(end, label, "event", trial, weak)
@@ -134,9 +136,10 @@ def session_rows(s: Session, names: list[str] | None = None
     keys = key_onsets(s, sig)
     for i, k in enumerate(keys):
         nxt = keys[i + 1]["onset"] if i + 1 < len(keys) else n   # okno nie siega poczatku nastepnego gestu
-        for off in EVENT_OFFSETS:
+        prv = keys[i - 1]["onset"] if i else -1                  # ani nie obejmuje poprzedniego (gesty gesto po sobie:
+        for off in OFFSETS_BY_LABEL.get(k["label"], EVENT_OFFSETS):   # dwa mrugniecia w oknie "pojedynczego")
             end = k["onset"] + int(round(off * fs))
-            if end <= nxt:
+            if end <= nxt and end - w > prv:
                 add(end, k["label"], "event", k["trial"], k["weak"])
     if keys:
         _gap_rows(s, sig, keys, add, rows, names)

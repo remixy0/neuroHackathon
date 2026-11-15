@@ -4,7 +4,7 @@ import pytest
 
 from backend import settings as S
 
-THR = {"blink": 0.47, "look_left": 0.46, "look_right": 0.38, "frown": 0.3, "jaw": 0.37,
+THR = {"double_blink": 0.47, "look_left": 0.46, "look_right": 0.38, "frown": 0.3, "jaw": 0.37,
        "head_left": 0.3, "head_right": 0.3, "head_up": 0.3, "head_down": 0.3}
 
 
@@ -17,7 +17,7 @@ def test_defaults_cover_all_profiles_and_gestures():
         for entry in prof.values():
             assert entry["button"] is None or entry["button"] in S.BUTTONS
             assert 30 <= entry["ms"] <= 2000
-    assert d["thresholds"]["blink"] == 0.47
+    assert d["thresholds"]["double_blink"] == 0.47
 
 
 def test_default_mapping_values():
@@ -27,7 +27,7 @@ def test_default_mapping_values():
     assert d["tetris"]["head_down"] == {"button": "down", "ms": 400}
     assert d["pong"]["head_up"] == {"button": "up", "ms": 300}
     assert d["runner"]["jaw"]["button"] == "a"
-    assert all(d[p]["blink"]["button"] is None for p in S.PROFILES)
+    assert all(d[p]["double_blink"]["button"] is None for p in S.PROFILES)
     assert all(d[p]["look_left"]["button"] is None for p in S.PROFILES)
 
 
@@ -84,10 +84,10 @@ def test_replace_persists_and_reloads(tmp_path):
     path = tmp_path / "settings.json"
     st = S.SettingsStore(path, THR)
     new = json.loads(json.dumps(st.data))
-    new["profiles"]["runner"]["blink"] = {"button": "up", "ms": 120}
+    new["profiles"]["runner"]["double_blink"] = {"button": "up", "ms": 120}
     st.replace(new)
     again = S.SettingsStore(path, THR)
-    assert again.data["profiles"]["runner"]["blink"] == {"button": "up", "ms": 120}
+    assert again.data["profiles"]["runner"]["double_blink"] == {"button": "up", "ms": 120}
 
 
 def test_load_corrupt_file_falls_back(tmp_path):
@@ -117,7 +117,7 @@ def test_replace_invalid_keeps_file(tmp_path):
 
 def test_action_none_when_unmapped(tmp_path):
     st = S.SettingsStore(tmp_path / "s.json", THR)
-    assert st.action("menu", "blink") is None
+    assert st.action("menu", "double_blink") is None
     assert st.action("runner", "head_up") == ("up", 120)
 
 
@@ -172,3 +172,39 @@ def test_new_fields_validated():
                 {"motion_mute_dps": 5}, {"motion_mute_dps": "30"}):
         with pytest.raises(ValueError):
             S.validate(bad, d)
+
+
+# --- podwójne mrugnięcie zamiast pojedynczego
+
+def test_gestures_double_blink_instead_of_blink():
+    assert "double_blink" in S.GESTURES and "blink" not in S.GESTURES
+    assert S.GESTURE_PL["double_blink"] == "Podwójne mrugnięcie"
+
+
+def test_old_blink_mapping_moves_to_double_blink():
+    d = S.default_settings(THR)
+    out = S.validate({"thresholds": {"blink": 0.2, "jaw": 0.4},
+                      "profiles": {"menu": {"blink": {"button": "a", "ms": 120}, "jaw": {"button": "b", "ms": 120}}}}, d)
+    assert out["profiles"]["menu"]["double_blink"] == {"button": "a", "ms": 120}
+    assert "blink" not in out["profiles"]["menu"] and "blink" not in out["thresholds"]
+    assert out["thresholds"]["double_blink"] == d["thresholds"]["double_blink"]     # inny gest: próg nie przechodzi
+    assert out["thresholds"]["jaw"] == 0.4 and out["profiles"]["menu"]["jaw"]["button"] == "b"
+
+
+def test_new_double_blink_entry_wins_over_old_blink():
+    d = S.default_settings(THR)
+    out = S.validate({"profiles": {"menu": {"blink": {"button": "a", "ms": 120},
+                                            "double_blink": {"button": "x", "ms": 300}}}}, d)
+    assert out["profiles"]["menu"]["double_blink"] == {"button": "x", "ms": 300}
+
+
+def test_old_settings_file_with_blink_keeps_user_settings(tmp_path):
+    import json
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"refractory_s": 0.5, "head_gyro": True, "thresholds": {"blink": 0.2},
+                             "profiles": {"menu": {"blink": {"button": "a", "ms": 120},
+                                                   "head_right": {"button": "left", "ms": 120}}}}), encoding="utf-8")
+    st = S.SettingsStore(f, THR)
+    assert st.data["refractory_s"] == 0.5                                            # nie wraca do domyślnych
+    assert st.data["profiles"]["menu"]["double_blink"]["button"] == "a"
+    assert st.data["profiles"]["menu"]["head_right"]["button"] == "left"

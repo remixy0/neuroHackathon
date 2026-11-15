@@ -18,6 +18,7 @@ HOLD_S = 2.0
 TRIAL_S = 5.0
 FIRST_CUE_S = 17.0
 LOOK_HOLD_S = 1.0               # tryb klawiatury: tyle trwa spojrzenie w bok
+DOUBLE_GAP_S = 0.35             # podwojne mrugniecie: drugie tyle po pierwszym
 KEY_BEFORE_S, KEY_AFTER_S = 0.8, 0.5   # odcinek key_press wokol klawisza (jak session_recorder.KEY_SPAN_S)
 EEG = ["O1", "O2", "Fp2", "Fp1"]
 CHANNELS = EEG + [f"contact_{c}" for c in EEG] + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z",
@@ -36,9 +37,10 @@ def _move(eeg: dict, gyro: np.ndarray, rng, n: int, label: str, on_s: float, bac
     if label in HEAD:
         ax, sign = HEAD[label]
         gyro[ax] += sign * 110.0 * (_bump(n, on_s + 0.2, 0.1) - _bump(n, back_s + 0.2, 0.1))
-    elif label == "blink":
-        for c in ("Fp1", "Fp2"):
-            eeg[c] += 180.0 * _bump(n, on_s + 0.15, 0.06)
+    elif label in ("blink", "double_blink"):
+        for at in (0.15, 0.15 + DOUBLE_GAP_S) if label == "double_blink" else (0.15,):
+            for c in ("Fp1", "Fp2"):
+                eeg[c] += 180.0 * _bump(n, on_s + at, 0.06)
     elif label in ("frown", "jaw"):
         amp = {"frown": {"Fp1": 80.0, "Fp2": 80.0, "O1": 8.0, "O2": 8.0},
                "jaw": {"Fp1": 12.0, "Fp2": 12.0, "O1": 45.0, "O2": 45.0}}[label]
@@ -71,9 +73,10 @@ def write_session(root: Path, sid: str, person: str, mode: str, trials: list[str
             events += [{"sample": cue, "event": "stim_move", "label": label, "trial": k},
                        {"sample": ret, "event": "stim_move", "label": "center", "trial": k}]
             intervals += [(cue, ret, label, "dot_jump", k), (ret, int((cue_s + TRIAL_S) * FS), "center", "dot_jump", k)]
-        elif mode == "blink":
+        elif mode in ("blink", "double_blink"):
             events.append({"sample": cue, "event": "cue", "label": label, "trial": k})
-            intervals.append((cue, cue + int(FS), label, "expected_response", k))
+            span = 1.5 if mode == "double_blink" else 1.0
+            intervals.append((cue, cue + int(span * FS), label, "expected_response", k))
         else:
             events += [{"sample": cue, "event": "cue", "label": label, "trial": k},
                        {"sample": ret, "event": "return", "label": "center" if mode == "head" else "relax", "trial": k}]

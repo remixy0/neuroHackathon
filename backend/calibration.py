@@ -5,7 +5,7 @@ Osoba wykonuje po kolei (ok. 45 s, polecenia głosem i na stronie):
   2. głowa: lewo, prawo, góra, dół po 3 s
                            - próg żyroskopu = 0,4 x mediana szczytowych prędkości, w granicach 25-120°/s;
                              mniej niż 3 wyraźne ruchy -> zostaje próg z ustawień,
-  3. twarz: mrugnięcie, szczęka, czoło po 3 razy na przemian, po 2,5 s
+  3. twarz: podwójne mrugnięcie, szczęka, czoło po 3 razy na przemian, po 2,5 s
                            - dla gestu g: tło = kwantyl 0,95 pewności g w spokoju i w krokach innych gestów twarzy,
                              szczyt = mediana maksimów w krokach g, próg = tło + 0,4 x (szczyt - tło) w granicach
                              0,15-0,95. Gest działa, gdy szczyt > tło + 0,08 i co najmniej 2 próby przekraczają
@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-FACE = ("blink", "jaw", "frown")
+FACE = ("double_blink", "jaw", "frown")
 HEAD_AXIS = {"head_left": (0, 1), "head_right": (0, -1), "head_up": (1, 1), "head_down": (1, -1)}  # (oś, znak)
 REST_S = 8.0
 HEAD_S = 3.0
@@ -55,7 +55,7 @@ _HEAD_TEXT = {
 }
 # szczęka: tak jak w treningu modelu (sesje "jaw": szeroko otwarte usta)
 _FACE_TEXT = {
-    "blink": ("Mrugnij", "Mrugnij.", "Jedno wyraźne mrugnięcie."),
+    "double_blink": ("Mrugnij dwa razy", "Mrugnij dwa razy.", "Dwa szybkie, wyraźne mrugnięcia."),
     "jaw": ("Otwórz usta", "Otwórz usta.", "Otwórz szeroko usta i zamknij."),
     "frown": ("Zmarszcz czoło", "Zmarszcz czoło.", "Mocno zmarszcz czoło i rozluźnij."),
 }
@@ -153,7 +153,9 @@ class Calibration:
             if not probs or not o.get("contact_ok", True) or o.get("t", self.warmup_s) < self.warmup_s:
                 continue
             for g in FACE:
-                p = float(probs.get(g, 0.0))
+                if g not in probs:                      # klasy nie ma w modelu (jeszcze bez nagrań): brak danych
+                    continue
+                p = float(probs[g])
                 if g == step.gesture:
                     self._trial_max = p if self._trial_max is None else max(self._trial_max, p)
                 elif spill:                             # ogon poprzedniego ruchu: ani tło, ani nowa próba

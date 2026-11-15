@@ -24,6 +24,8 @@ ONSET_FRACTION = 0.3     # poczatek = pierwsza chwila, gdy aktywnosc osiaga te c
 
 HEAD = {"head_left": (1, 1), "head_right": (1, -1), "head_up": (2, 1), "head_down": (2, -1)}  # (os zyro, znak)
 LOOK = {"look_left": 1, "look_right": -1}   # znak skoku Fp1 - Fp2
+BLINKS = ("blink", "double_blink")
+DOUBLE_SPAN_S = 0.8     # podwojne mrugniecie: drugie mrugniecie najdalej tyle po pierwszym
 # (krotnosc rozrzutu tla, prog minimalny) dla kazdego rodzaju sladu
 HEAD_K, HEAD_MIN_DPS = 6.0, 15.0
 BLINK_K, BLINK_MIN_UV = 5.0, 15.0
@@ -52,7 +54,7 @@ def _traces(sig: dict[str, np.ndarray], label: str, a: int, b: int, fs: float) -
     if label in HEAD:
         ax, sign = HEAD[label]
         return [(sign * sig["gyro"][ax, a:b], HEAD_K, HEAD_MIN_DPS)]
-    if label == "blink":
+    if label in BLINKS:                                   # podwojne: poczatek = pierwsze mrugniecie
         return [(np.abs(fp1), BLINK_K, BLINK_MIN_UV), (np.abs(fp2), BLINK_K, BLINK_MIN_UV)]
     if label in LOOK:
         return [(LOOK[label] * (fp1 - fp2), LOOK_K, LOOK_MIN_UV)]
@@ -121,7 +123,7 @@ def _key_traces(sig: dict[str, np.ndarray], label: str, a: int, b: int, fs: floa
     """Jak _traces, ale dla oczu predkosc zamiast wychylenia: mrugniecie = |d/dt (Fp1+Fp2)/2|,
     spojrzenie = d/dt (Fp1-Fp2) w strone etykiety."""
     fp2, fp1 = sig["eog"][2, a:b], sig["eog"][3, a:b]
-    if label == "blink":
+    if label in BLINKS:
         return [(np.abs(_velocity((fp1 + fp2) / 2, fs)), BLINK_VK, BLINK_MIN_UVS)]
     if label in LOOK:
         return [(LOOK[label] * _velocity(fp1 - fp2, fs), SACC_K, SACC_MIN_UVS)]
@@ -169,7 +171,10 @@ def detect_key_onset(sig: dict[str, np.ndarray], label: str, key: int, fs: float
     if not moves:
         return default, True
     strong = max(p for _, p in moves)
-    on = min((m for m, p in moves if p >= KEY_MIN_PEAK * strong), key=lambda m: abs(s0 + m - default))
+    big = [m for m, p in moves if p >= KEY_MIN_PEAK * strong]
+    on = min(big, key=lambda m: abs(s0 + m - default))
+    if label == "double_blink":     # najblizej klawisza bywa drugie mrugniecie z pary: poczatek = pierwsze
+        on = min(m for m in big if on - int(DOUBLE_SPAN_S * fs) <= m <= on)
     return s0 + on, False
 
 

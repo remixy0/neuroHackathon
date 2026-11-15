@@ -7,7 +7,7 @@ Program uczy się na nagraniach ze znacznikami i rozpoznaje, co robi użytkownik
 
 Wszystkie wcześniejsze dane (`training/samples.jsonl` + `raw/`), oba modele (`models/`) i ręczne znaczniki
 nagrań (`labels/`) są w `archive/2026-11-14_przed-startem-od-zera/`. Nowe dane zbiera się wyłącznie w aplikacji
-macOS, w trybach treningu (oczy, mruganie, głowa, czoło, szczęka, klawiatura), i zapisują się jako ciągłe sesje:
+macOS, w trybach treningu (oczy, podwójne mrugnięcie, głowa, czoło, szczęka, klawiatura), i zapisują się jako ciągłe sesje:
 
     training/README.md               opis formatu (po angielsku, z przykładem wczytania)
     training/sessions/index.csv      jedna linia na sesję
@@ -240,7 +240,12 @@ działający silnik trzyma stary kod w pamięci.
 6. `gestures/recognizer.py` — strumień: okno co 0,1 s, wygładzanie, próg klasy, bez powtórzeń; ruch
    powrotny głowy rozpoznawany po kącie głowy. `gestures/validation.py` — podziały i symulacja na żywo.
 
-**Sesje trybu klawiatury** (`keys`: osoba sama mruga / patrzy w bok i oznacza gest klawiszem W/S, A, D):
+**Podwójne mrugnięcie** (`double_blink`, od 15.11.2026) zastąpiło pojedyncze jako gest. Pojedyncze (`blink`,
+stare sesje trybu mrugania) zostaje klasą modelu, żeby odróżniał je od podwójnego, ale nigdy nie jest zgłaszane
+(`recognizer.SILENT`). Początek ruchu = pierwsze mrugnięcie z pary; okna kończą się 0,8–1,4 s po nim, żeby objęły
+oba. Dopóki nie ma nagranych sesji podwójnego mrugnięcia, model tej klasy nie ma.
+
+**Sesje trybu klawiatury** (`keys`: osoba sama mruga podwójnie / patrzy w bok i oznacza gest klawiszem W/S, A, D):
 - początek ruchu szukany jest po obu stronach klawisza (0,8 s przed … 0,5 s po, najdalej do połowy drogi do
   sąsiedniego klawisza) po prędkości zmiany sygnału Fp; z kilku ruchów wygrywa ten najbliżej klawisza
   (`onsets.detect_key_onset`). `train_gestures.py` wypisuje dla każdej takiej sesji, przy ilu klawiszach ruch
