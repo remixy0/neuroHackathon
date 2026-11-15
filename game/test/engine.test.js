@@ -1,0 +1,9 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {createTrack,createPlayer,command,advance,parseInput} from '../src/engine.js';
+test('same seed gives identical course',()=>assert.deepEqual(createTrack(42),createTrack(42)));
+test('all obstacle rows leave a lane free',()=>{const t=createTrack(3);for(const o of t.filter(x=>x.type!=='coin'))assert.ok(t.some(c=>c.type==='coin'&&c.z===o.z+2&&c.lane!==o.lane));});
+test('input protocol validates player and direction',()=>{assert.deepEqual(parseInput('{"player":2,"direction":"góra"}'),{player:1,direction:'up',id:undefined});for(const bad of ['bad','null','{"player":0,"direction":"left"}','{"player":1,"direction":"jump"}'])assert.equal(parseInput(bad),null);});
+test('lane bounds and independent players',()=>{const a=createPlayer(),b=createPlayer();for(let i=0;i<4;i++)command(a,'left');assert.equal(a.lane,-1);assert.equal(b.lane,0);});
+test('collision once and invulnerability prevents second damage',()=>{const p=createPlayer();advance(p,.1,10,[{z:1,lane:0,type:'block'},{z:1,lane:0,type:'barrier'}]);assert.equal(p.lives,2);advance(p,.1,10,[{z:1,lane:0,type:'block'}]);assert.equal(p.lives,2);});
+test('jump clears barrier, slide clears gate, neither clears train',()=>{for(const [action,type] of [['up','barrier'],['down','gate']]){const p=createPlayer();command(p,action);advance(p,.35,10,[{z:3.5,lane:0,type}]);assert.equal(p.lives,3);}const p=createPlayer();command(p,'up');advance(p,.35,10,[{z:3.5,lane:0,type:'block'}]);assert.equal(p.lives,2);});
+test('coins counted once and eliminated player freezes',()=>{const p=createPlayer();const t=[{z:1,lane:0,type:'coin'}];advance(p,.1,10,t);advance(p,.1,10,t);assert.equal(p.coins,1);p.alive=false;const d=p.distance;advance(p,1,10,t);assert.equal(p.distance,d);});

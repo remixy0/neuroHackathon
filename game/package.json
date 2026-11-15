@@ -1,0 +1,1 @@
+{"name":"halo-rush","private":true,"version":"1.0.0","type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"vite build","test":"node --test test/*.test.js","mock":"node mock-server.js"},"dependencies":{"three":"^0.180.0"},"devDependencies":{"vite":"^6.1.0","ws":"^8.18.0"}}

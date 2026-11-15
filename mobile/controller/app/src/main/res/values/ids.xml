@@ -1,0 +1,4 @@
+<resources>
+    <item name="mode_halo" type="id" />
+    <item name="mode_manual" type="id" />
+</resources>
