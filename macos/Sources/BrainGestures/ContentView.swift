@@ -16,18 +16,22 @@ struct ContentView: View {
                     Picker("", selection: $tab) {
                         Text("Rozpoznawanie").tag(0)
                         Text("Trening").tag(1)
+                        Text("Kalibracja głowy").tag(2)
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 280)
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 420)
+                    .disabled(hub.busy)
                     Spacer()
                     ModelChip()
                 }
                 .padding(.horizontal, 16).padding(.top, 12)
                 if hub.active.isEmpty {
-                    Welcome(training: tab == 1)
+                    Welcome(training: tab == 1, headCalibration: tab == 2)
                 } else if tab == 0 {
                     RecognitionView()
-                } else {
+                } else if tab == 1 {
                     TrainingView()
+                } else {
+                    HeadCalibrationView()
                 }
             }
         }
@@ -215,11 +219,13 @@ struct StatusPill: View {
 struct Welcome: View {
     @EnvironmentObject var hub: Hub
     var training = false
+    var headCalibration = false
 
     var body: some View {
         VStack(spacing: 14) {
             Image(systemName: "brain.head.profile").font(.system(size: 64)).foregroundStyle(.secondary)
-            Text(training ? "Połącz czepek, aby trenować gesty" : "Połącz czepek, aby zobaczyć rozpoznawane gesty")
+            Text(headCalibration ? "Połącz czepek, aby skalibrować ruchy głowy"
+                 : training ? "Połącz czepek, aby trenować gesty" : "Połącz czepek, aby zobaczyć rozpoznawane gesty")
                 .font(.title3)
             Text("Włącz czepek BrainAccess HALO, kliknij „Szukaj czepków” i wybierz go z listy.\nDrugi czepek dodasz przyciskiem „Dodaj drugi czepek”. Bez czepka możesz odtworzyć nagranie w trybie demo.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)

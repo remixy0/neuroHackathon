@@ -55,12 +55,12 @@ class BluetoothFailureTest {
         fun click(label: String) = all().filterIsInstance<Button>().first { it.text.toString() == label }.performClick()
         try {
             all().filterIsInstance<EditText>().first().setText("ws://127.0.0.1:8766/ws/controller")
-            click("Dalej")
+            click("Next")
             repeat(2) {
-                click("Szukaj HALO")
+                click("Search for HALO")
                 shadowOf(Looper.getMainLooper()).idle()
                 assertTrue(all().filterIsInstance<TextView>().any { it.text.contains("Test: Bluetooth monitor denied") })
-                assertTrue(all().filterIsInstance<Button>().any { it.text == "Szukaj HALO" })
+                assertTrue(all().filterIsInstance<Button>().any { it.text == "Search for HALO" })
             }
         } finally { owner.pause().stop().destroy() }
     }

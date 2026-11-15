@@ -22,7 +22,8 @@ def test_recording_rows_and_header(tmp_path):
     rec.close()
     data = rows(rec.path / "eeg.csv")
     assert list(data[0].keys()) == (["sample", "t_s", "arrival_unix"] + CH + [f"contact_{c}" for c in CH]
-                                    + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z", "Sample"])
+                                    + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z", "Sample",
+                                       "phone_time_s", "phone_discarded", "ble_missed"])
     assert len(data) == 9 and rec.rows == 9                                # wiersz dummy pominięty
     assert [r["sample"] for r in data] == [str(i) for i in range(9)]
     assert [r["Sample"] for r in data] == ["1000", "1001", "1002", "1003", "1004", "1005", "1006", "1008", "1009"]
@@ -30,6 +31,22 @@ def test_recording_rows_and_header(tmp_path):
     assert float(data[0]["Accel_y"]) == 9.8 and data[0]["contact_O1"] == "1"
     p = make_packet(0, 1000, n=5)
     assert abs(float(data[3]["Fp2"]) - p.eeg[3, 2]) < 1e-3                  # wartości w kolejności kanałów
+
+
+def test_recording_phone_time_and_loss_counters(tmp_path):
+    """Czas telefonu i liczniki strat w każdym wierszu: opóźnienie sieci = arrival_unix - phone_time_s (+ stała),
+    ble_missed = zgubione na Bluetoothie, phone_discarded = odrzucone przez telefon jako stare."""
+    rec = SessionRecording(tmp_path, eeg_hello(), T0)
+    p = make_packet(0, 1000, n=3, host_time_ns=5_261_234_567_890_123)
+    p.phone_discarded, p.ble_missed = 4, 120
+    rec.add_packet(p, T0 + 0.02)
+    rec.add_packet(make_packet(1, 1003, n=2), T0 + 0.04)                  # starszy telefon: bez liczników
+    rec.close()
+    data = rows(rec.path / "eeg.csv")
+    assert [r["phone_time_s"] for r in data[:3]] == ["5261234.5679"] * 3
+    assert data[0]["phone_discarded"] == "4" and data[2]["ble_missed"] == "120"
+    assert data[3]["phone_time_s"] == data[3]["phone_discarded"] == data[3]["ble_missed"] == ""
+    assert data[3]["Sample"] == "1003"
 
 
 def test_recording_events_use_row_index(tmp_path):

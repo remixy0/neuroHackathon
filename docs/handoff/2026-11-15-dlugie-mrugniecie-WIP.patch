@@ -1,0 +1,661 @@
+diff --git a/backend/app.py b/backend/app.py
+index 8bcb8c7..12ca34e 100644
+--- a/backend/app.py
++++ b/backend/app.py
+@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketDisconnect
+ from . import protocol as P
+ from .arcade import ArcadeLink
+ from .sessions import EegSession, Hub, ManualSession, load_bundle
+-from .settings import GESTURE_PL, GESTURES, PROFILE_PL, PROFILES, SettingsStore
++from .settings import GESTURE_PL, GESTURES, PROFILE_PL, PROFILES, RULE_GESTURES, SettingsStore
+ 
+ log = logging.getLogger("halo.app")
+ 
+@@ -297,7 +297,8 @@ def create_app(settings_path: Path | str = DEFAULT_SETTINGS, arcade=None, bundle
+         return {
+             "gestures": [{"id": g, "name": GESTURE_PL[g], "reliability": rel.get(g),
+                           "model_threshold": round(float(thr.get(g, 0.5)), 3),
+-                          "in_model": g in classes} for g in GESTURES],
++                          "in_model": g in classes or g in RULE_GESTURES, "rule": RULE_GESTURES.get(g)}
++                         for g in GESTURES],
+             "profiles": [{"id": p, "name": PROFILE_PL[p]} for p in PROFILES],
+             "buttons": list(P.BUTTONS),
+             "phone_urls": [f"ws://{ip}:{port}/ws/controller" for ip in lan_ips()]
+diff --git a/backend/settings.py b/backend/settings.py
+index 2d811dc..8777e13 100644
+--- a/backend/settings.py
++++ b/backend/settings.py
+@@ -12,15 +12,20 @@ from pathlib import Path
+ 
+ from .protocol import BUTTONS
+ 
+-GESTURES = ["head_left", "head_right", "head_up", "head_down", "jaw", "frown", "double_blink", "look_left",
++GESTURES = ["head_left", "head_right", "head_up", "head_down", "jaw", "frown", "long_blink", "look_left",
+             "look_right"]
+ # dawne gesty w starych plikach ustawień -> gest, który je zastąpił (przycisk przechodzi, próg nie: inny ruch)
+-LEGACY = {"blink": "double_blink"}
++# długie mrugnięcie (oczy zamknięte ~0,5 s, blinks.LongBlink) zastąpiło podwójne (15.11.2026): zwykłe mrugnięcie wygląda
++# jak mimowolne, a podwójne trafiało ok. 60%
++LEGACY = {"blink": "long_blink", "double_blink": "long_blink"}
++# gesty z reguły na sygnale (nie z modelu): id -> skąd
++RULE_GESTURES = {"long_blink": "fp"}
+ PROFILES = ["menu", "tetris", "pong", "runner"]
+ GESTURE_PL = {
+     "head_left": "Przechył / obrót w lewo", "head_right": "Przechył / obrót w prawo", "head_up": "Głowa w górę",
+     "head_down": "Głowa w dół", "jaw": "Zaciśnięcie szczęki", "frown": "Zmarszczenie czoła",
+-    "double_blink": "Podwójne mrugnięcie", "look_left": "Spojrzenie w lewo", "look_right": "Spojrzenie w prawo",
++    "long_blink": "Długie mrugnięcie (oczy zamknięte ~0,5 s)", "look_left": "Spojrzenie w lewo",
++    "look_right": "Spojrzenie w prawo",
+ }
+ PROFILE_PL = {"menu": "Menu", "tetris": "Tetris", "pong": "Pong", "runner": "Runner"}
+ DEFAULT_ARCADE_URL = "ws://localhost:8787"
+@@ -56,12 +61,10 @@ DEFAULT_MUTE_DPS = 30.0
+ MUTE_DPS_RANGE = (10.0, 200.0)
+ FLAGS = ("calibration", "voice", "record", "head_turn")   # kalibracja na starcie sesji, polecenia głosem, zapis sesji
+ # na dysk, lewo/prawo także obrotem głowy
+-# Skąd podwójne mrugnięcie: "fp" = reguła na sygnale Fp1/Fp2 (blinks.py, kierunek z kalibracji), "model" = klasa
+-# double_blink z modelu (w nowej sesji prawie nie działa: 0% w walidacji krzyżowej)
+-BLINK_SOURCES = ("fp", "model")
++# Dawne pole "blink_source" (podwójne mrugnięcie z Fp albo z modelu) jest pomijane: długie mrugnięcie liczy zawsze Fp.
+ 
+ # gest -> (przycisk, ms); brak gestu = wyłączony
+-_EEG = {"double_blink": ("a", TAP_MS), "look_left": ("left", TAP_MS), "look_right": ("right", TAP_MS)}
++_EEG = {"long_blink": ("a", TAP_MS), "look_left": ("left", TAP_MS), "look_right": ("right", TAP_MS)}
+ _DEFAULTS: dict[str, dict[str, tuple[str, int]]] = {
+     "menu": {"head_left": ("left", TAP_MS), "head_right": ("right", TAP_MS), "head_up": ("up", TAP_MS),
+              "head_down": ("down", TAP_MS), **_EEG},
+@@ -92,7 +95,7 @@ def default_settings(model_thresholds: dict[str, float]) -> dict:
+     return {"schema": SCHEMA, "arcade_url": DEFAULT_ARCADE_URL, "refractory_s": DEFAULT_GAP_S,
+             "head_tilt_deg": DEFAULT_TILT_DEG, "head_turn": True, "head_turn_deg": DEFAULT_TURN_DEG,
+             "head_mode": dict(DEFAULT_HEAD_MODE), "analog_range_deg": DEFAULT_ANALOG_RANGE_DEG,
+-            "calibration": True, "voice": True, "record": True, "blink_source": "fp",
++            "calibration": True, "voice": True, "record": True,
+             "motion_mute_s": DEFAULT_MUTE_S, "motion_mute_dps": DEFAULT_MUTE_DPS,
+             "thresholds": thresholds, "profiles": profiles}
+ 
+@@ -152,10 +155,6 @@ def validate(data: dict, defaults: dict) -> dict:
+     mute_dps = _number(data, "motion_mute_dps", *MUTE_DPS_RANGE, "prędkość głowy wyciszająca gesty twarzy", "°/s")
+     if mute_dps is not None:
+         out["motion_mute_dps"] = round(mute_dps, 1)
+-    if "blink_source" in data:
+-        if not isinstance(data["blink_source"], str) or data["blink_source"] not in BLINK_SOURCES:
+-            raise ValueError("blink_source musi być 'fp' albo 'model'")
+-        out["blink_source"] = data["blink_source"]
+     for flag in FLAGS:
+         if flag in data:
+             if not isinstance(data[flag], bool):
+@@ -205,7 +204,7 @@ def validate(data: dict, defaults: dict) -> dict:
+ 
+ 
+ def _migrate_v2(profiles: dict) -> None:
+-    """Plik sprzed schematu 2: szczęka i czoło wyłączone, wolne podwójne mrugnięcie i spojrzenia jak w domyślnych."""
++    """Plik sprzed schematu 2: szczęka i czoło wyłączone, wolne długie mrugnięcie i spojrzenia jak w domyślnych."""
+     for p, mapping in profiles.items():
+         for g in ("jaw", "frown"):
+             mapping[g]["button"] = None
+diff --git a/backend/tests/test_app.py b/backend/tests/test_app.py
+index 6bbbac4..cd985f3 100644
+--- a/backend/tests/test_app.py
++++ b/backend/tests/test_app.py
+@@ -406,3 +406,12 @@ def test_api_info_marks_gestures_missing_from_model(tmp_path, bundle):
+     assert "blink" not in g and "double_blink" in g
+     assert g["jaw"]["in_model"] is True
+     assert g["double_blink"]["in_model"] is ("double_blink" in bundle["classes"])
++
++
++def test_info_long_blink_is_rule_based(tmp_path, bundle):
++    app, _ = make(tmp_path, bundle)
++    with TestClient(app) as c:
++        g = {x["id"]: x for x in c.get("/api/info").json()["gestures"]}
++    assert "double_blink" not in g
++    assert g["long_blink"]["in_model"] is True and g["long_blink"]["rule"] == "fp"
++    assert g["jaw"].get("rule") is None
+diff --git a/backend/tests/test_sessions.py b/backend/tests/test_sessions.py
+index a64ffa4..76e16b0 100644
+--- a/backend/tests/test_sessions.py
++++ b/backend/tests/test_sessions.py
+@@ -1322,3 +1322,26 @@ def test_skip_goes_back_to_app_calibration(store, bundle, tmp_path):
+     asyncio.run(feed(s, 1.0))
+     s.skip_calibration()
+     assert s.tilt_source == "app" and s.pipeline.tilt_cal["directions"]["head_left"]["threshold_deg"] == 10.0
++
++
++# --- długie mrugnięcie z sygnału Fp (blinks.LongBlink)
++
++def test_pipeline_long_blink_from_fp(bundle):
++    from backend.tests.test_blinks import natural, signal_with
++    pl, names = _pipeline(bundle)
++    fp = signal_with(30, blinks=natural(1, 20), closures=[(22.0, 0.7)])
++    arr = _chunk(names, 30.0)
++    arr[names.index("Fp1")], arr[names.index("Fp2")] = fp[0], fp[1]
++    events = []
++    for s in range(0, arr.shape[1], 5):
++        events += [o for o in pl.process(arr[:, s:s + 5]) if o.get("event")]
++    assert [(e["event"], e.get("kind")) for e in events] == [("long_blink", "fp")]
++
++
++def test_model_blink_classes_never_dispatched(bundle):
++    pl, names = _pipeline(bundle)
++    pl.process(_chunk(names, 2.0))
++    for ev in ("double_blink", "blink"):
++        pl.gr.event = ev
++        out = [o for o in pl.process(_chunk(names, 0.04)) if "probs" in o][0]
++        assert out["event"] is None, ev
+diff --git a/backend/tests/test_settings.py b/backend/tests/test_settings.py
+index d721daa..c3ac353 100644
+--- a/backend/tests/test_settings.py
++++ b/backend/tests/test_settings.py
+@@ -294,3 +294,22 @@ def test_old_settings_file_with_blink_keeps_user_settings(tmp_path):
+     assert st.data["refractory_s"] == 0.5                                            # nie wraca do domyślnych
+     assert st.data["profiles"]["menu"]["double_blink"]["button"] == "a"
+     assert st.data["profiles"]["menu"]["head_right"]["button"] == "left"
++
++
++# --- długie mrugnięcie (oczy zamknięte ~0,5 s) zamiast podwójnego
++
++def test_long_blink_replaces_double_blink():
++    d = S.default_settings(THR)
++    assert "double_blink" not in S.GESTURES and "long_blink" in S.GESTURES
++    for p in ("menu", "tetris", "runner"):
++        assert d["profiles"][p]["long_blink"]["button"] == "a"
++    assert "blink_source" not in d
++    assert S.GESTURE_PL["long_blink"] == "Długie mrugnięcie (oczy zamknięte ~0,5 s)"
++
++
++def test_old_double_blink_mapping_moves_to_long_blink():
++    d = S.default_settings(THR)
++    out = S.validate({"schema": 2, "blink_source": "model", "thresholds": {"double_blink": 0.4},
++                      "profiles": {"tetris": {"double_blink": {"button": "x", "ms": 120}}}}, d)
++    assert out["profiles"]["tetris"]["long_blink"] == {"button": "x", "ms": 120}
++    assert "double_blink" not in out["profiles"]["tetris"] and "blink_source" not in out
+--- a/backend/blinks.py
++++ b/backend/blinks.py
+@@ -1,19 +1,17 @@
+-"""Podwójne mrugnięcie (w grach przycisk A) regułą na sygnale Fp1/Fp2 zamiast klasy double_blink z modelu.
++"""Długie mrugnięcie (w grach przycisk A): oczy zamknięte ok. pół sekundy, regułą na sygnale Fp1/Fp2.
+ 
+-Model trafiał double_blink w 90% w tej samej sesji, ale w 0% w nowej sesji tej samej osoby (mylił je ze zwykłym
+-mrugnięciem): okno 1,5 s nie odróżnia dwóch mrugnięć w odstępie 0,25 s od jednego. Pomiar na nagraniach
+-(tools/training/sessions, docs/handoff/2026-11-15-podwojne-mrugniecie-HANDOFF.md):
++Zwykłe mrugnięcie na polecenie wygląda w sygnale tak samo jak mimowolne (nagrania 14-15.11: 581 na polecenie i 142
++mimowolne mają tę samą siłę i długość), a w grze ludzie mrugają mimowolnie ok. 7 razy na minutę - pojedyncze zwykłe
++mrugnięcie wciskałoby A samo. Zwykłe mrugnięcie trwa 0,1-0,3 s; gestem jest zamknięcie oczu dłuższe niż próg osoby
++(domyślnie 0,4 s ponad progiem utrzymania, czyli ok. 0,5 s zamkniętych oczu; z kalibracji 0,6 x typowa długość jej zamknięć w granicach 0,3-0,7 s).
+ 
+-- mrugnięcie w (Fp1+Fp2)/2 po filtrze 0,5-10 Hz to szczyt 15-250 µV; kierunek (+/-) zależy od założenia opaski,
+-  więc jest ustalany na bieżąco albo z kalibracji ("Mrugnij dwa razy"),
+-- w podwójnym mrugnięciu szczyty dzielą 0,20-0,30 s, a drugi bywa dużo słabszy (powieka nie otwiera się do końca);
+-  szybkie pojedyncze mruganie to odstępy 0,40-0,67 s,
+-- skoki elektrod dają 1000-4000 µV: amplituda osoby jest liczona z typowych szczytów, nie z kwantyla sygnału.
++Sygnał: (Fp1+Fp2)/2. Kierunek (+/-) zależy od założenia opaski - ustalany na bieżąco albo z kalibracji ("Zamknij oczy
++na pół sekundy"). Siła mrugnięcia osoby = mediana górnej ćwiartki szczytów w paśmie 0,5-10 Hz z ostatnich 30 s; skoki
++elektrod (1000-4000 µV) się do niej nie liczą i wyciszają wykrywanie na 1 s. Zamknięcie liczone na sygnale 0,1-10 Hz
++(pasmo od 0,5 Hz zjadałoby plateau zamkniętych oczu): zaczyna się, gdy sygnał przekroczy K_ON x siła, a w ostatnich
++RISE_S był poniżej K_LOW x siła (szybkie opadnięcie powieki - wolny dryf, np. spojrzenie w górę, tego nie spełnia),
++trwa, póki sygnał jest powyżej K_HOLD x siła. Gest w chwili, gdy zamknięcie trwa próg osoby - jeden na zamknięcie.
+ 
+-Wynik na nagraniach (tylko fragmenty bez nasycenia): ok. 58% podwójnych trafionych (63%, gdy kierunek znany
+-z kalibracji; model: 0% w nowej sesji), 8% serii szybkich pojedynczych mrugnięć uznanych za podwójne, ok. 1 fałszywe
+-na minutę w sesjach innych gestów (głowa, szczęka, czoło, oczy).
+-
+ Klasa jest czysta (bez I/O) i działa próbka po próbce: wynik nie zależy od podziału na pakiety.
+ """
+ from __future__ import annotations
+@@ -23,25 +21,33 @@
+ import numpy as np
+ from scipy import signal
+ 
+-K = 0.4                 # pierwsze mrugnięcie: szczyt >= K * amplituda osoby
+-K2 = 0.25               # drugie (zwykle słabsze): >= K2 * amplituda
+-REL = 0.25              # dwa szczyty są osobne, gdy sygnał między nimi spada poniżej (1 - REL) szczytu
+-MIN_GAP_S = 0.12        # odstęp szczytów podwójnego mrugnięcia
+-MAX_GAP_S = 0.40
+-REFRACTORY_S = 0.8      # najwyżej jedno podwójne na tyle sekund
++K_ON = 0.5              # zamknięcie: sygnał >= K_ON x siła mrugnięcia osoby ...
++K_LOW = 0.2             # ... a w ostatnich RISE_S był poniżej K_LOW x siła (strome zbocze)
++RISE_S = 0.2
++K_HOLD = 0.35           # zamknięcie trwa, póki sygnał >= K_HOLD x siła
++DEFAULT_MIN_S = 0.40    # gest: zamknięcie trwa co najmniej tyle (bez kalibracji; mierzone powyżej K_HOLD, ok. 0,5 s zamkniętych oczu)
++CAL_FRACTION = 0.6      # z kalibracji: próg = tyle mediany długości zamknięć osoby ...
++MIN_LIMITS = (0.3, 0.7)  # ... w tych granicach
++CAL_MIN_CLOSURE_S = 0.25  # krótsze zamknięcia w krokach kalibracji to zwykłe mrugnięcia - nie liczą się
++REFRACTORY_S = 0.8      # najwyżej jedno długie mrugnięcie na tyle sekund
+ WARMUP_S = 5.0          # przed tym nic nie jest zgłaszane (filtr i statystyki)
+-BAND = (0.5, 10.0)      # Hz
++BAND = (0.5, 10.0)      # Hz: szczyty mrugnięć (siła osoby, kierunek, skoki elektrod)
++SLOW_BAND = (0.1, 10.0)  # Hz: zamknięcie oczu (plateau)
++REL = 0.25              # dwa szczyty są osobne, gdy sygnał między nimi spada poniżej (1 - REL) szczytu
+ BLOCK = 50              # szum = 25. percentyl odchylenia w blokach po 0,2 s ...
+ NOISE_S = 20.0          # ... z ostatnich 20 s (bloki z mrugnięciami go nie zawyżają)
+ FLOOR_NOISE = 4.0       # szczyt kandydat: wyższy niż 4 x szum ...
+ FLOOR_UV = 8.0          # ... i niż 8 µV
+-AMP_S = 30.0            # amplituda osoby = mediana górnej ćwiartki szczytów z ostatnich 30 s
+-KEEP_S = 120.0          # szczyty pamiętane dla kalibracji
+-ARTIFACT_NOISE = 60.0   # szczyt powyżej max(60 x szum, 400 µV) albo 6 x amplituda to artefakt (skok elektrody):
+-ARTIFACT_UV = 400.0     # nie liczy się do amplitudy, a po nim przez BLANK_S nic nie jest zgłaszane
++AMP_S = 30.0            # siła osoby = mediana górnej ćwiartki szczytów z ostatnich 30 s
++KEEP_S = 120.0          # szczyty i zamknięcia pamiętane dla kalibracji
++ARTIFACT_NOISE = 60.0   # szczyt powyżej max(60 x szum, 400 µV) albo 6 x siła to artefakt (skok elektrody):
++ARTIFACT_UV = 400.0     # nie liczy się do siły, a po nim przez BLANK_S nic nie jest zgłaszane
+ ARTIFACT_RATIO = 6.0
+ BLANK_S = 1.0
+ RESET_BLANK_S = 0.5     # po luce w danych filtr startuje od nowa
++# Otwarcie oczu daje szczyt w przeciwną stronę prawie tak duży jak zamknięcie: automatyczny kierunek zmienia się
++# dopiero, gdy druga strona jest tyle razy silniejsza (inaczej kilka zamknięć odwracało kierunek).
++POLARITY_SWITCH = 1.5
+ 
+ 
+ class _Peaks:
+@@ -71,29 +77,37 @@
+         return None
+ 
+ 
+-class DoubleBlink:
+-    """push(fp) z wierszami [Fp1, Fp2] (µV) -> czasy [s, zegar detektora] wykrytych podwójnych mrugnięć."""
++class LongBlink:
++    """push(fp) z wierszami [Fp1, Fp2] (µV) -> czasy [s, zegar detektora] wykrytych długich mrugnięć."""
+ 
+     def __init__(self, fs: float):
+         self.fs = float(fs)
+         self.sos = signal.butter(2, BAND, "bandpass", fs=self.fs, output="sos")
++        self.sos_slow = signal.butter(2, SLOW_BAND, "bandpass", fs=self.fs, output="sos")
+         self.zi = None
++        self.zi_slow = None
+         self.n = 0
+-        self.min_gap, self.max_gap = int(MIN_GAP_S * fs), int(MAX_GAP_S * fs)
+         self.refractory, self.warmup = int(REFRACTORY_S * fs), int(WARMUP_S * fs)
+         self.amp_n, self.keep_n = int(AMP_S * fs), int(KEEP_S * fs)
++        self.rise_n = max(1, int(RISE_S * fs))
+         self._blocks: deque[float] = deque(maxlen=int(NOISE_S * fs / BLOCK))
+         self._block: list[float] = []
+         self._cands: dict[int, deque[tuple[int, float]]] = {1: deque(), -1: deque()}   # (próbka, wysokość)
+         self._trk = {1: _Peaks(), -1: _Peaks()}
++        self._ring: deque[float] = deque(maxlen=self.rise_n)    # sygnał wolny z ostatnich RISE_S
+         self.noise: float | None = None
+         self.low: float | None = None
+         self.amp: dict[int, float | None] = {1: None, -1: None}
+         self.auto_polarity: int | None = None
+         self.fixed_polarity: int | None = None
+-        self._first: int | None = None           # próbka pierwszego mrugnięcia, które czeka na drugie
+-        self._last_double = -10 ** 9
++        self.min_s = DEFAULT_MIN_S
++        self._closed: int | None = None          # próbka początku zamknięcia w toku
++        self._closed_pol: int | None = None
++        self._fired = False
++        self._peak = 0.0
++        self._last_fire = -10 ** 9
+         self._blank_until = 0
++        self.closures: deque[tuple[int, int, float]] = deque()   # (początek, długość w próbkach, szczyt)
+         self.detections: deque[int] = deque(maxlen=64)
+         self.artifacts = 0
+ 
+@@ -118,13 +132,24 @@
+             top = max(3, int(np.ceil(0.25 * mags.size)))
+             self.amp[p] = float(np.median(mags[-top:])) if mags.size >= 4 else None
+         a, b = self.amp[1], self.amp[-1]
+-        self.auto_polarity = None if a is None and b is None else 1 if b is None or (a is not None and a >= b) else -1
++        if a is None and b is None:
++            self.auto_polarity = None
++        elif self.auto_polarity is None or self.amp[self.auto_polarity] is None:
++            self.auto_polarity = 1 if b is None or (a is not None and a >= b) else -1
++        else:
++            cur, other = self.amp[self.auto_polarity], self.amp[-self.auto_polarity]
++            if other is not None and other > POLARITY_SWITCH * cur:
++                self.auto_polarity = -self.auto_polarity
++        while self.closures and self.closures[0][0] < self.n - self.keep_n:
++            self.closures.popleft()
+ 
+     def reset(self) -> None:
+-        """Luka w danych: filtr i szczyty od nowa, osoba (szum, amplituda, kierunek) zostaje."""
++        """Luka w danych: filtry, szczyty i zamknięcie w toku od nowa, osoba (szum, siła, kierunek, próg) zostaje."""
+         self.zi = None
++        self.zi_slow = None
+         self._trk = {1: _Peaks(), -1: _Peaks()}
+-        self._first = None
++        self._ring.clear()
++        self._closed = None
+         self._block = []
+         self._blank_until = self.n + int(RESET_BLANK_S * self.fs)
+ 
+@@ -135,10 +160,12 @@
+         x = fp.mean(axis=0)
+         if self.zi is None:
+             self.zi = signal.sosfilt_zi(self.sos) * x[0]
++            self.zi_slow = signal.sosfilt_zi(self.sos_slow) * x[0]
+         v, self.zi = signal.sosfilt(self.sos, x, zi=self.zi)
++        w, self.zi_slow = signal.sosfilt(self.sos_slow, x, zi=self.zi_slow)
+         out: list[float] = []
+         every = int(self.fs)
+-        for val in v:
++        for val, slow in zip(v, w):
+             self.n += 1
+             n = self.n
+             self._block.append(val)
+@@ -149,51 +176,64 @@
+                 self._stats()
+             if self.low is None:
+                 continue
+-            pol = self.polarity
+             for p in (1, -1):
+                 peak = self._trk[p].step(p * val, n, self.low, REL)
+                 if peak is not None:
+-                    if self._peak(p, pol, *peak):
+-                        out.append(n / self.fs)
++                    self._candidate(p, *peak)
++            if self._closure(slow):
++                out.append(n / self.fs)
+         return out
+ 
+-    def _peak(self, p: int, pol: int | None, pn: int, m: float) -> bool:
+-        """Szczyt w kierunku p (pn = próbka szczytu, m = wysokość). True = właśnie skończyło się podwójne."""
++    def _candidate(self, p: int, pn: int, m: float) -> None:
++        """Szczyt w kierunku p: kandydat do siły osoby; skok elektrody wycisza wykrywanie i przerywa zamknięcie."""
+         self._cands[p].append((pn, m))
+-        n = self.n
++        pol = self.polarity
+         amp = self.amp.get(pol) if pol is not None else None
+-        if p != pol or amp is None or n < self.warmup:
+-            return False
+-        if m > self._cap() or m > ARTIFACT_RATIO * amp:
+-            self._blank_until = n + int(BLANK_S * self.fs)
+-            self._first = None
++        if m > self._cap() or (amp is not None and m > ARTIFACT_RATIO * amp):
++            self._blank_until = self.n + int(BLANK_S * self.fs)
++            self._closed = None
+             self.artifacts += 1
++
++    def _closure(self, slow: float) -> bool:
++        """Jedna próbka sygnału wolnego. True = właśnie wykryte długie mrugnięcie."""
++        pol = self.polarity
++        amp = self.amp.get(pol) if pol is not None else None
++        if pol is None or amp is None:
++            self._ring.append(0.0)
+             return False
+-        if n < self._blank_until:
++        n = self.n
++        s = pol * slow
++        before = min(self._ring) if self._ring else s
++        self._ring.append(s)
++        if self._closed is not None and pol != self._closed_pol:
++            self._closed = None                          # kierunek się zmienił: zamknięcie w toku nieważne
++        if self._closed is None:
++            if s >= K_ON * amp and before < K_LOW * amp and n >= self._blank_until:
++                self._closed, self._closed_pol, self._fired, self._peak = n, pol, False, s
+             return False
+-        first = self._first
+-        if first is not None and self.min_gap <= pn - first <= self.max_gap and m >= max(K2 * amp, self.low):
+-            self._first = None
+-            if n - self._last_double >= self.refractory:
+-                self._last_double = n
+-                self.detections.append(n)
+-                return True
++        self._peak = max(self._peak, s)
++        if s < K_HOLD * amp:
++            self.closures.append((self._closed, n - self._closed, self._peak))
++            self._closed = None
+             return False
+-        if m >= max(K * amp, self.low) and (first is None or pn - first > self.min_gap):
+-            self._first = pn
++        if (not self._fired and n - self._closed >= self.min_s * self.fs and n >= self.warmup
++                and n >= self._blank_until and n - self._last_fire >= self.refractory):
++            self._fired, self._last_fire = True, n
++            self.detections.append(n)
++            return True
+         return False
+ 
+     def calibrate(self, windows: list[tuple[int, int]]) -> dict:
+-        """Kroki kalibracji "Mrugnij dwa razy" (próbki detektora od-do): w każdym kroku pierwsze duże wychylenie
+-        (>= połowy największego) to mrugnięcie, a nie przerzut filtra po nim - jego kierunek głosuje; krok ze skokiem
+-        elektrody (np. ogon ruchu głowy z poprzedniego kroku) nie głosuje. Co najmniej
+-        dwa zgodne głosy i większość ustalają kierunek na resztę sesji; inaczej kierunek jest automatyczny."""
++        """Kroki kalibracji "Zamknij oczy na pół sekundy" (próbki detektora od-do). Kierunek: w każdym kroku pierwsze
++        duże wychylenie (>= połowy największego) głosuje; krok ze skokiem elektrody nie głosuje; co najmniej dwa zgodne
++        głosy i większość ustalają kierunek na resztę sesji. Próg czasu: CAL_FRACTION x mediana długości zamknięć
++        (>= CAL_MIN_CLOSURE_S) w krokach, w granicach MIN_LIMITS, gdy są co najmniej dwa; inaczej bez zmian."""
+         cap = self._cap()
+         votes = {1: 0, -1: 0}
+         hits = 0
+         for a, b in windows:
+             peaks = sorted((n, p, m) for p in (1, -1) for n, m in self._cands[p] if a <= n < b)
+-            if peaks and all(m < cap for _, _, m in peaks):       # okno ze skokiem elektrody nie głosuje
++            if peaks and all(m < cap for _, _, m in peaks):
+                 top = max(m for _, _, m in peaks)
+                 votes[next(p for _, p, m in peaks if m >= 0.5 * top)] += 1
+             hits += any(a <= d < b + int(0.5 * self.fs) for d in self.detections)
+@@ -201,12 +241,17 @@
+         if best is None or votes[best] < 2:
+             best = None
+         self.fixed_polarity = best              # niepewny kierunek: automatyczny (np. po ponownej kalibracji)
++        durs = [d / self.fs for start, d, _ in self.closures
++                if any(a <= start < b for a, b in windows) and d / self.fs >= CAL_MIN_CLOSURE_S]
++        if len(durs) >= 2:
++            self.min_s = round(float(np.clip(CAL_FRACTION * np.median(durs), *MIN_LIMITS)), 3)
+         return {"source": "fp", "polarity": best, "votes": {"+": votes[1], "-": votes[-1]}, "hits": hits,
+-                "trials": len(windows)}
++                "trials": len(windows), "closures": len(durs), "min_s": self.min_s}
+ 
+     def snapshot(self) -> dict:
+         pol = self.polarity
+         amp = self.amp.get(pol) if pol is not None else None
+         return {"polarity": pol, "fixed": self.fixed_polarity is not None,
+                 "amplitude_uv": None if amp is None else round(amp, 1),
+-                "noise_uv": None if self.noise is None else round(self.noise, 1), "artifacts": self.artifacts}
++                "noise_uv": None if self.noise is None else round(self.noise, 1), "artifacts": self.artifacts,
++                "min_s": self.min_s}
+--- a/backend/tests/test_blinks.py
++++ b/backend/tests/test_blinks.py
+@@ -1,32 +1,44 @@
+-"""Podwójne mrugnięcie z sygnału Fp1/Fp2 (blinks.DoubleBlink) na syntetycznym sygnale."""
++"""Długie mrugnięcie (oczy zamknięte ~0,5 s) z sygnału Fp1/Fp2 (blinks.LongBlink) na syntetycznym sygnale."""
+ import numpy as np
++import pytest
+ 
+-from backend.blinks import DoubleBlink
++from backend.blinks import LongBlink
+ 
+ FS = 250.0
++AMP = 100.0
+ 
+ 
+ def bump(t: np.ndarray, at: float, amp: float, width: float = 0.07) -> np.ndarray:
+-    """Mrugnięcie w surowym Fp: jednofazowe wychylenie ~0,25 s."""
++    """Zwykłe mrugnięcie w surowym Fp: jednofazowe wychylenie ~0,2 s."""
+     return amp * np.exp(-0.5 * ((t - at) / width) ** 2)
+ 
+ 
+-def signal_with(seconds: float, singles=(), doubles=(), pairs=(), amp=100.0, second=0.9, gap=0.3, noise=4.0,
+-                sign=1.0, seed=0):
+-    """Fp1/Fp2 (2, N): szum + dryf + pojedyncze mrugnięcia, podwójne (drugie słabsze) i pary w odstępie (t, odstęp)."""
++def closure(t: np.ndarray, at: float, seconds: float, level: float, edge: float = 0.08) -> np.ndarray:
++    """Zamknięte oczy: szybkie opadnięcie powieki (edge s), plateau `level`, szybkie otwarcie."""
++    up = np.clip((t - at) / edge, 0, 1)
++    down = np.clip((at + seconds - t) / edge, 0, 1)
++    w = np.minimum(up, down)
++    return level * w * w * (3 - 2 * w)
++
++
++def signal_with(seconds: float, blinks=(), closures=(), ramps=(), steps=(), amp=AMP, noise=4.0, sign=1.0, seed=0):
++    """Fp1/Fp2 (2, N): szum + powolny dryf + zwykłe mrugnięcia, zamknięcia (start, czas), rampy (start, czas, poziom
++    w ułamku amp, trzymanie) i skoki elektrod (chwila, µV)."""
+     rng = np.random.default_rng(seed)
+     t = np.arange(int(seconds * FS)) / FS
+     x = 300.0 + 20.0 * np.sin(2 * np.pi * 0.05 * t) + rng.normal(0, noise, t.size)
+-    for s in singles:
+-        x += sign * bump(t, s, amp)
+-    for d in doubles:
+-        x += sign * (bump(t, d, amp) + bump(t, d + gap, second * amp))
+-    for p, g in pairs:
+-        x += sign * (bump(t, p, amp) + bump(t, p + g, amp))
++    for b in blinks:
++        x += sign * bump(t, b, amp)
++    for at, dur in closures:
++        x += sign * closure(t, at, dur, 0.8 * amp)
++    for at, dur, level, hold in ramps:
++        x += sign * level * amp * np.clip((t - at) / dur, 0, 1) * (t < at + dur + hold)
++    for at, uv in steps:
++        x += uv * np.exp(-0.5 * ((t - at) / 0.02) ** 2)
+     return np.vstack([x, x + rng.normal(0, noise, t.size)])
+ 
+ 
+-def run(det: DoubleBlink, fp: np.ndarray, chunk: int = 5) -> list[float]:
++def run(det: LongBlink, fp: np.ndarray, chunk: int = 5) -> list[float]:
+     out = []
+     for i in range(0, fp.shape[1], chunk):
+         out += det.push(fp[:, i:i + chunk])
+@@ -37,88 +49,95 @@
+     return list(np.arange(start, stop, every))
+ 
+ 
+-def test_double_blink_detected_once():
+-    fp = signal_with(30, singles=natural(1, 20), doubles=[22.0])
+-    ev = run(DoubleBlink(FS), fp)
+-    assert len(ev) == 1
+-    assert 22.2 <= ev[0] <= 22.5                     # zaraz po drugim mrugnięciu
++BG = natural(1.0, 60.0)          # zwykłe mrugnięcia w tle: z nich detektor zna siłę mrugnięcia osoby
+ 
+ 
+-def test_single_blinks_are_not_double():
+-    rng = np.random.default_rng(3)
+-    singles = list(np.cumsum(rng.uniform(1.2, 3.0, 25)))
+-    assert run(DoubleBlink(FS), signal_with(singles[-1] + 2, singles=singles)) == []
++def test_long_closure_detected_once():
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(21.0, 0.6)])
++    out = run(LongBlink(FS), fp)
++    assert len(out) == 1 and 21.4 <= out[0] <= 21.65
+ 
+ 
+-def test_slow_pair_is_two_singles():
+-    """Dwa zwykłe mrugnięcia 0,6 s po sobie (szybkie mruganie) to nie podwójne: podwójne ma odstęp 0,2-0,3 s."""
+-    fp = signal_with(30, singles=natural(1, 20), pairs=[(22.0, 0.6), (25.0, 0.55)])
+-    assert run(DoubleBlink(FS), fp) == []
++def test_normal_blinks_are_not_long():
++    assert run(LongBlink(FS), signal_with(60, blinks=BG)) == []
+ 
+ 
+-def test_inverted_polarity_works():
+-    """Kierunek mrugnięcia w Fp zależy od założenia opaski: ustalany na bieżąco."""
+-    fp = signal_with(30, singles=natural(1, 20), doubles=[22.0], sign=-1.0)
+-    det = DoubleBlink(FS)
+-    ev = run(det, fp)
+-    assert len(ev) == 1 and det.polarity == -1
++def test_fast_blink_series_is_not_long():
++    fp = signal_with(40, blinks=natural(1, 20) + list(np.arange(22.0, 24.0, 0.3)))
++    assert run(LongBlink(FS), fp) == []
+ 
+ 
+-def test_noise_only_is_quiet():
+-    assert run(DoubleBlink(FS), signal_with(40, noise=8.0)) == []
++def test_slow_drift_is_not_long():
++    fp = signal_with(40, blinks=natural(1, 20), ramps=[(22.0, 1.5, 0.6, 2.0)])
++    assert run(LongBlink(FS), fp) == []
+ 
+ 
+-def test_nothing_during_warmup():
+-    fp = signal_with(10, singles=[0.5, 1.5], doubles=[2.5])
+-    assert run(DoubleBlink(FS), fp) == []
++def test_closures_do_not_flip_polarity():
++    # otwarcie oczu daje szczyt w przeciwną stronę: kilka zamknięć nie może odwrócić kierunku
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(22.0, 0.7), (25.0, 0.7), (28.0, 0.7), (31.0, 0.7)])
++    det = LongBlink(FS)
++    assert len(run(det, fp)) == 4 and det.polarity == 1
+ 
+ 
+-def test_artifact_does_not_trigger_or_break_detection():
+-    fp = signal_with(45, singles=natural(1, 40, 2.2), doubles=[41.0])
+-    fp[:, int(15 * FS):int(15.4 * FS)] += 4000.0     # elektroda odskoczyła
+-    ev = run(DoubleBlink(FS), fp)
+-    assert len(ev) == 1 and 41.1 <= ev[0] <= 41.5
++def test_eyes_closed_3s_fires_once():
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(21.0, 3.0)])
++    assert len(run(LongBlink(FS), fp)) == 1
+ 
+ 
++def test_inverted_polarity_works():
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(21.0, 0.6)], sign=-1.0)
++    assert len(run(LongBlink(FS), fp)) == 1
++
++
++def test_artifact_does_not_trigger():
++    fp = signal_with(40, blinks=natural(1, 20), steps=[(21.0, 2500.0)], closures=[(30.0, 0.6)])
++    out = run(LongBlink(FS), fp)
++    assert len(out) == 1 and out[0] > 30
++
++
+ def test_chunk_size_does_not_matter():
+-    fp = signal_with(30, singles=natural(1, 20), doubles=[22.0, 26.0])
+-    assert run(DoubleBlink(FS), fp, chunk=5) == run(DoubleBlink(FS), fp, chunk=40)
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(21.0, 0.6), (30.0, 0.8)])
++    assert run(LongBlink(FS), fp, chunk=5) == run(LongBlink(FS), fp, chunk=37)
+ 
+ 
+-def test_reset_keeps_person_and_detects_soon_after():
+-    fp = signal_with(40, singles=natural(1, 20), doubles=[24.0])
+-    det = DoubleBlink(FS)
+-    run(det, fp[:, :int(21 * FS)])
+-    det.reset()                                       # luka w danych z telefonu
+-    ev = run(det, fp[:, int(21 * FS):])
+-    assert len(ev) == 1
++def test_gap_during_closure_no_detection():
++    fp = signal_with(40, blinks=natural(1, 20), closures=[(21.0, 0.6)])
++    det = LongBlink(FS)
++    a = int(21.2 * FS)
++    out = run(det, fp[:, :a])
++    det.reset()                                   # luka w danych w połowie zamknięcia
++    out += run(det, fp[:, a + 10:])
++    assert out == []
+ 
+ 
+-def test_calibration_sets_polarity():
+-    """Kroki kalibracji "Mrugnij dwa razy": pierwsze duże wychylenie w każdym kroku wyznacza kierunek."""
+-    steps = [(5.0, 7.5), (10.0, 12.5), (15.0, 17.5)]
+-    fp = signal_with(22, singles=[1.0, 3.0], doubles=[s + 0.8 for s, _ in steps], sign=-1.0)
+-    det = DoubleBlink(FS)
++def test_nothing_during_warmup():
++    fp = signal_with(20, blinks=[0.5, 1.5, 2.5], closures=[(3.0, 0.6)])
++    assert run(LongBlink(FS), fp) == []
++
++
++def _calibrated(sign=1.0, closures=((22.0, 0.7), (25.0, 0.7), (28.0, 0.7))):
++    fp = signal_with(40, blinks=natural(1, 20), closures=closures, sign=sign)
++    det = LongBlink(FS)
+     run(det, fp)
+-    result = det.calibrate([(int(a * FS), int(b * FS)) for a, b in steps])
+-    assert result["polarity"] == -1 and result["trials"] == 3
+-    assert det.polarity == -1 and det.fixed_polarity == -1
++    windows = [(int((at - 0.5) * FS), int((at + 2.0) * FS)) for at, _ in closures]
++    return det, det.calibrate(windows)
+ 
+ 
+-def test_calibration_without_blinks_keeps_auto():
+-    det = DoubleBlink(FS)
+-    run(det, signal_with(20, noise=4.0))
+-    result = det.calibrate([(int(5 * FS), int(7 * FS)), (int(10 * FS), int(12 * FS))])
+-    assert result["polarity"] is None and det.fixed_polarity is None
++def test_calibration_sets_polarity_and_min_s():
++    det, res = _calibrated(sign=-1.0)
++    assert res["polarity"] == -1 and det.fixed_polarity == -1
++    assert res["min_s"] == pytest.approx(0.6 * 0.7, abs=0.08) and det.min_s == res["min_s"]
++    assert res["closures"] == 3
+ 
+ 
+-def test_calibration_ignores_steps_with_artifacts():
+-    """Skok elektrody w kroku (ogon ruchu głowy z poprzedniego kroku) nie głosuje o kierunku."""
+-    steps = [(5.0, 7.5), (10.0, 12.5), (15.0, 17.5)]
+-    fp = signal_with(22, singles=[1.0, 3.0], doubles=[s + 0.8 for s, _ in steps], sign=-1.0)
+-    for s, _ in steps[:2]:
+-        fp[:, int((s + 0.1) * FS):int((s + 0.4) * FS)] += 3000.0
+-    det = DoubleBlink(FS)
+-    run(det, fp)
+-    result = det.calibrate([(int(a * FS), int(b * FS)) for a, b in steps])
+-    assert result["votes"] == {"+": 0, "-": 1} and result["polarity"] is None and det.fixed_polarity is None
++def test_calibration_without_closures_keeps_defaults():
++    det, res = _calibrated(closures=())
++    assert det.min_s == 0.4 and res["min_s"] == 0.4 and det.fixed_polarity is None
++
++
++def test_calibrated_min_s_applies():
++    # osoba zamyka oczy krótko (0,5 s): po kalibracji 0,42 s zamknięcia już wystarcza (domyślnie nie), a zwykłe mrugnięcie nie
++    det, _ = _calibrated(closures=((22.0, 0.5), (25.0, 0.5), (28.0, 0.5)))
++    fp = signal_with(40, blinks=natural(1, 20) + [33.0], closures=[(35.0, 0.42)], seed=1)
++    out = run(det, fp[:, int(30 * FS):])
++    assert len(out) == 1

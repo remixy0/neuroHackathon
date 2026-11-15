@@ -1,11 +1,11 @@
-# Testowy odbiornik HALO
+# HALO test receiver
 
-Odbiera i wypisuje pełne wiadomości JSON (w tym EEG, akcelerometr, żyroskop).
-Odpowiada `ready` na `hello` i `ack` na każdy pakiet `samples` lub zdarzenie `manual`, zgodnie z
-kontraktem aplikacji Android. Nie uruchamia modelu ani nie wysyła ruchów do gry.
-Przyjmuje też opaski bez IMU, ponieważ służy wyłącznie do testowania transmisji.
+Receives and prints the full JSON messages (including EEG, accelerometer, gyroscope).
+Answers `hello` with `ready` and every `samples` packet or `manual` event with `ack`, as in
+the Android app's contract. It does not run a model and does not send moves to the game.
+It also accepts headbands without an IMU, because it is only for testing the stream.
 
-Wymagany Node.js 20+:
+Requires Node.js 20+:
 
 ```sh
 cd mobile/test-server
@@ -13,39 +13,39 @@ npm install
 npm start
 ```
 
-Serwer nasłuchuje na wszystkich interfejsach na porcie **8766** (osobnym od
-mocka gry). Przy starcie wypisuje aktualne adresy komputera. W telefonie:
+The server listens on all interfaces on port **8766** (separate from the
+game mock). On start it prints the computer's current addresses. On the phone:
 
-1. Połącz telefon i komputer z tą samą siecią Wi-Fi.
-2. Wpisz wypisany adres `ws://ADRES_KOMPUTERA:8766/ws/controller`.
-3. Pole tokenu pozostaw puste. Wybierz gracza, wyszukaj HALO i połącz opaskę.
-4. W terminalu zobaczysz `[READY]`, następnie `[RX]` z danymi oraz `[ACK]`
-   z rosnącym licznikiem odebranych próbek. W aplikacji licznik wysłanych próbek
-   powinien rosnąć. Brak komend w aplikacji jest oczekiwany dla tego serwera.
+1. Connect the phone and the computer to the same Wi-Fi network.
+2. Enter the printed address `ws://COMPUTER_ADDRESS:8766/ws/controller`.
+3. Leave the token field empty. Choose a player, search for HALO and connect the headband.
+4. In the terminal you will see `[READY]`, then `[RX]` with the data and `[ACK]`
+   with a growing count of received samples. In the app the count of sent samples
+   should grow. No commands in the app is expected with this server.
 
-**Test bez HALO:** w formularzu aplikacji wybierz „Kontroler ręczny · bez opaski”.
-Po połączeniu naciśnij dowolny przycisk pada. Terminal wypisze pełny JSON `[RX]`
-oraz np. `[MANUAL] gracz=1, przycisk=left, id=<session_id>:0`. Serwer potwierdza
-odbiór przez `ack`; nie uruchamia gry ani nie nadaje przyciskom dodatkowego znaczenia.
-Zmiana gracza na padzie otwiera nową sesję. Sesje HALO i manual mogą działać
-jednocześnie dla różnych graczy. Ten sam gracz pozostaje zarezerwowany dla jednej sesji.
+**Test without HALO:** in the app's form choose "On-screen pad".
+After connecting, press any pad button. The terminal prints the full `[RX]` JSON
+and e.g. `[MANUAL] player=1, button=left, id=<session_id>:0`. The server acknowledges
+receipt with `ack`; it does not run the game or give the buttons any extra meaning.
+Changing the player on the pad opens a new session. HALO and manual sessions can run
+at the same time for different players. The same player stays reserved for one session.
 
-Przyciski: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `select`, `start`.
-Jedno stuknięcie = jedno `manual` z `action: "press"`, rosnącym `seq` i unikalnym `id`.
-Brak klikania nie rozłącza pada: aplikacja wysyła WebSocket ping co 5 s.
-Format wiadomości: [kontrakt, sekcja 7](../WEBSOCKET.md#7-kontroler-ręczny-manual).
+Buttons: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `select`, `start`.
+One tap = one `manual` with `action: "press"`, a growing `seq` and a unique `id`.
+Not tapping does not disconnect the pad: the app sends a WebSocket ping every 5 s.
+Message format: [contract, section 7](../WEBSOCKET.md#7-manual-controller-manual).
 
-Możesz wcześniej otworzyć `http://ADRES_KOMPUTERA:8766/health` w przeglądarce
-telefonu. Odpowiedź `{"status":"ok",...}` potwierdza dostępność sieciową bez HALO.
-Jeśli brak odpowiedzi, sprawdź adres, zaporę macOS (zezwól Node na połączenia
-przychodzące) i izolację urządzeń w Wi-Fi. `localhost` w telefonie nie wskazuje
-komputera. Alternatywnie połącz oba urządzenia z hotspotem.
+You can first open `http://COMPUTER_ADDRESS:8766/health` in the phone's
+browser. The reply `{"status":"ok",...}` confirms network reachability without HALO.
+If there is no reply, check the address, the macOS firewall (allow Node incoming
+connections) and client isolation on the Wi-Fi. `localhost` on the phone does not point to
+the computer. Alternatively connect both devices to a hotspot.
 
-Zmiana portu: `PORT=9000 npm start`. Zatrzymanie: Ctrl+C.
-Serwer jest przeznaczony do lokalnego testu, nie ma uwierzytelniania; tokeny
-nie są wymagane ani sprawdzane. Nie zapisuje danych do bazy ani plików.
+Change the port: `PORT=9000 npm start`. Stop: Ctrl+C.
+The server is meant for a local test and has no authentication; tokens
+are neither required nor checked. It does not save data to a database or files.
 
-Testy automatyczne (nie wymagają HALO):
+Automated tests (no HALO needed):
 
 ```sh
 npm test

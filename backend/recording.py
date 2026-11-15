@@ -6,7 +6,11 @@ Pozwala porównać sygnał z telefonu z nagraniami treningowymi i douczyć model
         eeg.csv        jedna linia na próbkę; kolumny jak w tools/training/sessions/<id>/eeg.csv:
                        sample (nr wiersza), t_s (= sample / fs), arrival_unix (przyjęcie pakietu), kanały EEG [uV],
                        contact_<kanał> (1/0, wartość pakietu), Accel_x..z, Gyro_x..z [°/s], Sample (nr próbki
-                       w telefonie - przeskok = zgubione próbki; wiersze dummy pominięte)
+                       w telefonie - przeskok = zgubione próbki; wiersze dummy pominięte), phone_time_s (zegar
+                       telefonu przy odbiorze z HALO, host_time_ns / 1e9; opóźnienie sieci = arrival_unix -
+                       phone_time_s + stała), phone_discarded (próbki odrzucone przez telefon jako stare),
+                       ble_missed (narastający licznik zgubionych na Bluetoothie); trzy ostatnie puste, gdy telefon
+                       ich nie wysyła
         events.csv     sample (wiersz eeg.csv, przed którym padło zdarzenie), t_s, unix_time, event, label, details
                        (JSON); zdarzenia: calibration_step, calibration_done, calibration_skipped, gesture, muted
         session.json   gracz, opaska, fs, kanały, liczba próbek; status "recording" do zamknięcia sesji
@@ -49,7 +53,8 @@ class SessionRecording:
         ch = list(hello.channels)
         self._eeg = open(self.path / "eeg.csv", "w", newline="", encoding="utf-8")
         self._eeg.write(",".join(["sample", "t_s", "arrival_unix"] + ch + [f"contact_{c}" for c in ch]
-                                 + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z", "Sample"]) + "\n")
+                                 + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z", "Sample",
+                                    "phone_time_s", "phone_discarded", "ble_missed"]) + "\n")
         self._events_file = open(self.path / "events.csv", "w", newline="", encoding="utf-8")
         self._events = csv.writer(self._events_file)
         self._events.writerow(["sample", "t_s", "unix_time", "event", "label", "details"])
@@ -62,6 +67,9 @@ class SessionRecording:
             return
         contact = ",".join("1" if c else "0" for c in p.contact)
         arrival = f"{arrival_unix:.3f}"
+        phone = ",".join(["" if p.host_time_ns is None else f"{p.host_time_ns / 1e9:.4f}",
+                          "" if p.phone_discarded is None else str(p.phone_discarded),
+                          "" if p.ble_missed is None else str(p.ble_missed)])
         lines = []
         for i in range(p.n):
             if p.dummy[i]:
@@ -70,7 +78,7 @@ class SessionRecording:
                 str(self.rows), f"{self.rows / self.fs:.4f}", arrival,
                 ",".join(f"{v:.3f}" for v in p.eeg[i]), contact,
                 ",".join(f"{v:.4f}" for v in p.accel[i]), ",".join(f"{v:.3f}" for v in p.gyro[i]),
-                str(p.first_index + i)]))
+                str(p.first_index + i), phone]))
             self.rows += 1
         if lines:
             self._eeg.write("\n".join(lines) + "\n")

@@ -92,6 +92,18 @@ class ArcadeLink:
         except WebSocketException:
             return False
 
+    async def position(self, player: int, pos: float) -> bool:
+        """Pozycja analogowa 0..1 (Pong: paletka, 0 = góra). Arcade trzyma ją do następnej zmiany albo do
+        naciśnięcia up/down."""
+        ws = self._ws
+        if ws is None or not self.connected:
+            return False
+        try:
+            await ws.send(json.dumps({"player": player, "pos": pos}))
+            return True
+        except WebSocketException:
+            return False
+
     async def close(self) -> None:
         self._closed = True
         self._wake.set()

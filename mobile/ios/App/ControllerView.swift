@@ -34,10 +34,10 @@ struct ControllerView: View {
                         }
                     }.padding(4).background(Retro.rim, in: Capsule())
                     Spacer(minLength: 0)
-                    Circle().fill(.green).frame(width: 9, height: 9).accessibilityLabel("Połączono")
-                    if geometry.size.width > 430 { Text("ONLINE · \(sent)").font(.system(.caption, design: .monospaced).bold()).foregroundStyle(Retro.ink).accessibilityLabel("Połączono. Wysłano \(sent) zdarzeń") }
+                    Circle().fill(.green).frame(width: 9, height: 9).accessibilityLabel("Connected")
+                    if geometry.size.width > 430 { Text("ONLINE · \(sent)").font(.system(.caption, design: .monospaced).bold()).foregroundStyle(Retro.ink).accessibilityLabel("Connected. Sent \(sent) events") }
                     Button(action: onClose) { Image(systemName: "xmark").font(.headline).frame(width: 44, height: 44) }
-                        .buttonStyle(.plain).accessibilityLabel("Zakończ sesję")
+                        .buttonStyle(.plain).accessibilityLabel("End session")
                 }
                 GeometryReader { pad in
                     let side = min(wide ? pad.size.width * 0.29 : pad.size.width * 0.62, wide ? pad.size.height - 24 : pad.size.height * 0.49, 300)

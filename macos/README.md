@@ -97,6 +97,18 @@ teraz żadnego modelu: zakładka „Rozpoznawanie” pokazuje sygnał i pozycję
 rozpoznaje, dopóki z nowych sesji nie powstanie nowy model. Tryb z kamerą, trening przez klikanie
 kafelków i tryb automatyczny zostały usunięte.
 
+## Kalibracja głowy (akcelerometr)
+
+Ruchy głowy w grach idą z akcelerometru, bez EEG (`tools/gestures/tilt.py`): lewo / prawo = przechył w bok
+(ucho do ramienia), góra / dół = pochylenie. Zakładka „Kalibracja głowy” pokazuje na żywo położenie głowy
+względem środka, wychylenie w każdą stronę z kreską progu i wykryte ruchy (te same progi co w grze).
+„Kalibruj” prowadzi głosem przez ok. 25 s: spokój 5 s, potem przechył w lewo, w prawo, głowa w górę i w dół
+po 4 s. Wynik: dla każdego kierunku największe wychylenie i próg = 0,45 × wychylenie (6–25°); kierunek
+z ruchem poniżej 8° zostaje na progu domyślnym. „Zapisz” zapisuje kalibrację dla czepka do
+`tools/training/calibration/tilt_<czepek>.json`, a serwer HALO → Arcade (`backend/`) czyta ją przy
+każdej sesji telefonu z tym czepkiem. Czepek łączy się z jednym urządzeniem naraz, więc po zapisie
+rozłącz go w aplikacji i połącz z telefonem. W trybie demo zapis jest wyłączony.
+
 ## Jak to jest zbudowane
 
 - `Sources/BrainGestures/` — interfejs. Uruchamia silnik `tools/engine.py` jako proces potomny

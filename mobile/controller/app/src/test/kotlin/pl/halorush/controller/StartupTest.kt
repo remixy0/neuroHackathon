@@ -44,7 +44,7 @@ class StartupTest {
         val owner = Robolectric.buildActivity(MainActivity::class.java).setup()
         try {
             shadowOf(Looper.getMainLooper()).idle()
-            assertTrue(views(owner.get().window.decorView).filterIsInstance<Button>().any { it.text == "Dalej" })
+            assertTrue(views(owner.get().window.decorView).filterIsInstance<Button>().any { it.text == "Next" })
             assertNull(shadowOf(owner.get()).lastRequestedPermission)
         } finally { owner.pause().stop().destroy() }
     }
@@ -58,18 +58,18 @@ class StartupTest {
         fun click(label: String) = all().filterIsInstance<Button>().first { it.text.toString() == label }.performClick()
         try {
             all().filterIsInstance<EditText>().first().setText("ws://127.0.0.1:8766/ws/controller")
-            click("Dalej")
-            click("Szukaj HALO")
+            click("Next")
+            click("Search for HALO")
             assertEquals(setOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT),
                 shadowOf(activity).lastRequestedPermission.requestedPermissions.toSet())
             shadowOf(app).grantPermissions(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
             shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE, true)
             @Suppress("DEPRECATION")
             shadowOf(BluetoothAdapter.getDefaultAdapter()).setEnabled(true)
-            click("Szukaj HALO")
+            click("Search for HALO")
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(all().filterIsInstance<TextView>().any { it.text.contains("Test: Bluetooth initialization denied") })
-            assertTrue(all().filterIsInstance<Button>().any { it.text == "Szukaj HALO" })
+            assertTrue(all().filterIsInstance<Button>().any { it.text == "Search for HALO" })
         } finally { owner.pause().stop().destroy() }
     }
 }

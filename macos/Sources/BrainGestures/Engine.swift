@@ -25,6 +25,35 @@ struct HeadEye: Equatable {
     var eyesX = 0.0, eyesCalibrated = false, eyesOk = true
 }
 
+/// Ekran "Kalibracja glowy": stan z silnika (tools/gestures/tilt.py TiltScreen, zdarzenie "tilt" ok. 10 razy na s).
+struct TiltState: Equatable {
+    /// Wychylenie glowy wzgledem srodka w strone kazdego kierunku [°] (ujemne = w przeciwna strone).
+    var angles: [String: Double] = [:]
+    /// Prog kazdego kierunku [°]: z zapisanej kalibracji albo domyslny.
+    var thresholds: [String: Double] = [:]
+    var step: String?
+    var counts: [String: Int] = [:]
+    /// Wynik zbieranej kalibracji: kierunek -> (najwieksze wychylenie, prog); nil = za maly ruch.
+    var preview: [String: (angle: Double?, threshold: Double?)] = [:]
+    var previewReady = false        // jest srodek (krok spokoju) - mozna zapisac
+    var saved = false               // czepek ma zapisana kalibracje
+    var ready = false               // detektor zna srodek glowy
+
+    static func == (a: TiltState, b: TiltState) -> Bool {
+        a.angles == b.angles && a.thresholds == b.thresholds && a.step == b.step && a.counts == b.counts
+            && a.previewReady == b.previewReady && a.saved == b.saved && a.ready == b.ready
+            && a.preview.keys == b.preview.keys
+            && a.preview.allSatisfy { k, v in b.preview[k].map { $0.angle == v.angle && $0.threshold == v.threshold } ?? false }
+    }
+}
+
+/// Ruch glowy wykryty na ekranie kalibracji (te same progi co w grze).
+struct TiltHit: Identifiable {
+    let id = UUID()
+    let key: String
+    let at: Date
+}
+
 struct Device: Identifiable, Equatable {
     var id: String { address + name }
     let name: String
@@ -97,6 +126,12 @@ final class Engine: ObservableObject, Identifiable {
     @Published var modelState = "none"
     @Published var modelMessage = ""
     @Published var modelSamples = 0
+
+    // ekran "Kalibracja glowy" (zapis: training/calibration/tilt_<czepek>.json, czyta go serwer HALO -> Arcade)
+    @Published var tilt: TiltState?
+    @Published var tiltHits: [TiltHit] = []
+    @Published var tiltMessage = ""
+    @Published var tiltSavedOK = false
 
     /// Wywolywane przy zmianach istotnych dla calej aplikacji (stan, sesje) - nie przy kazdej probce.
     var onChange: (() -> Void)?
@@ -262,6 +297,15 @@ final class Engine: ObservableObject, Identifiable {
         }
     }
     private func applyEmoCounts() { emoCounts = emoByPerson[person.trimmingCharacters(in: .whitespaces)] ?? [:] }
+    // MARK: kalibracja glowy (akcelerometr)
+
+    /// Otwiera ekran (silnik zaczyna wysylac stan) i czysci zebrane kroki.
+    func tiltStart() { tiltMessage = ""; tiltSavedOK = false; send(["cmd": "tilt_start"]) }
+    /// Krok kalibracji: "neutral", "head_left"...; nil = nie zbieramy.
+    func tiltStep(_ step: String?) { send(["cmd": "tilt_step", "step": step ?? NSNull()]) }
+    func tiltSave() { send(["cmd": "tilt_save"]) }
+    func tiltStop() { send(["cmd": "tilt_stop"]); tilt = nil; tiltHits = [] }
+
     /// Silnik kalibruje odczyt oczu na probach spojrzen tej osoby.
     func sendPerson() { send(["cmd": "person", "name": person.trimmingCharacters(in: .whitespaces)]) }
     func requestSessionsState() { send(["cmd": "sessions_state"]) }
@@ -270,6 +314,7 @@ final class Engine: ObservableObject, Identifiable {
         gestures = []; traces = [:]; families = []; top = []; battery = nil; contact = [:]
         confidence = 0; familyConfidence = 0; label = "rest"; family = "rest"; time = 0; lost = 0
         position = nil
+        tilt = nil; tiltHits = []; tiltMessage = ""; tiltSavedOK = false
     }
 
     private func applySessionStats() {
@@ -299,7 +344,7 @@ final class Engine: ObservableObject, Identifiable {
             state = EngineState(rawValue: e["state"] as? String ?? "") ?? .idle
             message = e["message"] as? String ?? ""
             if state == .streaming { isDemo = e["demo"] as? Bool ?? false }
-            if state != .streaming { sessionRecording = false }
+            if state != .streaming { sessionRecording = false; tilt = nil }
             onChange?()
         case "devices":
             let list = e["devices"] as? [[String: Any]] ?? []
@@ -371,6 +416,26 @@ final class Engine: ObservableObject, Identifiable {
                             familyConfidence: e["family_confidence"] as? Double ?? 0)
             gestures.insert(g, at: 0)
             if gestures.count > 200 { gestures.removeLast() }
+        case "tilt":
+            func degrees(_ v: Any?) -> [String: Double] {
+                (v as? [String: Any] ?? [:]).compactMapValues { ($0 as? NSNumber)?.doubleValue }
+            }
+            let preview = e["preview"] as? [String: Any] ?? [:]
+            let dirs = preview["directions"] as? [String: [String: Any]] ?? [:]
+            tilt = TiltState(
+                angles: degrees(e["angles"]), thresholds: degrees(e["thresholds"]), step: e["step"] as? String,
+                counts: (e["counts"] as? [String: Any] ?? [:]).compactMapValues { ($0 as? NSNumber)?.intValue },
+                preview: dirs.mapValues { (angle: ($0["angle_deg"] as? NSNumber)?.doubleValue,
+                                           threshold: ($0["threshold_deg"] as? NSNumber)?.doubleValue) },
+                previewReady: preview["neutral"] is [Any], saved: e["saved"] as? Bool ?? false,
+                ready: e["ready"] as? Bool ?? false)
+            let now = Date()
+            for key in e["gestures"] as? [String] ?? [] { tiltHits.insert(TiltHit(key: key, at: now), at: 0) }
+            if tiltHits.count > 12 { tiltHits.removeLast(tiltHits.count - 12) }
+        case "tilt_saved":
+            tiltSavedOK = e["ok"] as? Bool ?? false
+            tiltMessage = tiltSavedOK ? "Zapisano dla czepka \(e["device"] as? String ?? sourceName)."
+                : (e["message"] as? String ?? "Nie zapisano.")
         default:
             break
         }

@@ -1,15 +1,13 @@
 package pl.halorush.controller
 
 import kotlinx.coroutines.*
-import okhttp3.OkHttpClient
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /** Manual input has no local backlog: controls only send while a session is ready. */
 class ManualController(private val status: (ConnectionUpdate) -> Unit) {
-    private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.SECONDS).pingInterval(5, TimeUnit.SECONDS).build()
+    private val http = BackendHttp.client(pingSeconds = 5)
     @Volatile private var active: BackendSocket? = null
 
     fun press(button: String): Boolean {
@@ -24,12 +22,12 @@ class ManualController(private val status: (ConnectionUpdate) -> Unit) {
             val socket = BackendSocket(http, UUID.randomUUID().toString(), player, {}, mode = "manual")
             var graceful = false
             try {
-                status(ConnectionUpdate(ConnectionPhase.SERVER, "Łączenie kontrolera z serwerem…"))
+                status(ConnectionUpdate(ConnectionPhase.SERVER, "Connecting the controller to the server…"))
                 socket.open(url, token)
-                status(ConnectionUpdate(ConnectionPhase.REGISTERING, "Potwierdzanie trybu ręcznego…"))
+                status(ConnectionUpdate(ConnectionPhase.REGISTERING, "Confirming manual mode…"))
                 socket.handshake(Protocol.manualHello(socket.sessionId, player))
                 active = socket
-                status(ConnectionUpdate(ConnectionPhase.STREAMING, "Kontroler gotowy"))
+                status(ConnectionUpdate(ConnectionPhase.STREAMING, "Controller ready"))
                 coroutineScope {
                     launch { socket.awaitFailure() }
                     val started = System.nanoTime()
@@ -46,7 +44,7 @@ class ManualController(private val status: (ConnectionUpdate) -> Unit) {
             } catch (_: IOException) { /* reconnect with a fresh session, without replaying presses */
             } finally { active = null; socket.close(graceful) }
             val seconds = minOf(1L shl minOf(attempt++, 4), 10L)
-            status(ConnectionUpdate(ConnectionPhase.RETRYING, "Ponowne połączenie za $seconds s. Przyciski są wstrzymane."))
+            status(ConnectionUpdate(ConnectionPhase.RETRYING, "Reconnecting in $seconds s. Buttons are paused."))
             delay(seconds * 1000)
         }
     }

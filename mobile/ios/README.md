@@ -1,100 +1,100 @@
 # HALO Controller — Swift / iOS
 
-Natywna aplikacja SwiftUI dla iPhone'a i iPada (iOS 16+). Projekt nie korzysta
-z Kotlina ani z bibliotek Androida. Android pozostaje w `../controller`.
+Native SwiftUI app for iPhone and iPad (iOS 16+). The project does not use
+Kotlin or Android libraries. Android stays in `../controller`.
 
-**Dostępny jest tryb ręczny. Bezpośrednia transmisja EEG z BrainAccess HALO
-nie została zaimplementowana.** To port konfiguracji, kontrolera i transportu
-WebSocket, a nie pełny zamiennik trybu HALO z Androida.
+**Manual mode is available. Direct EEG streaming from BrainAccess HALO
+has not been implemented.** This is a port of the setup, the controller and the WebSocket
+transport, not a full replacement for Android's HALO mode.
 
-## Uruchomienie na iPhonie
+## Running on an iPhone
 
-1. Otwórz `HaloController.xcodeproj` w pełnym Xcode z zainstalowanym SDK iOS.
-2. Wybierz schemat `HaloController`. W `Signing & Capabilities` wybierz swój Team
-   i w razie potrzeby zmień identyfikator `pl.halorush.controller`.
-3. Wybierz iPhone'a lub symulator i uruchom aplikację (Run).
-4. Uruchom istniejący odbiornik: `cd mobile/test-server && npm install && npm start`.
-5. W telefonie wpisz adres wypisany przez odbiornik, np.
-   `ws://192.168.1.20:8766/ws/controller`. Telefon i komputer muszą mieć połączenie
-   sieciowe; `localhost` w telefonie nie oznacza komputera. Zezwól aplikacji na
-   dostęp do sieci lokalnej. Token dla testowego odbiornika pozostaw pusty.
-6. Wybierz gracza → Dalej → Połącz i otwórz pada.
+1. Open `HaloController.xcodeproj` in full Xcode with the iOS SDK installed.
+2. Choose the `HaloController` scheme. In `Signing & Capabilities` pick your Team
+   and, if needed, change the `pl.halorush.controller` identifier.
+3. Choose an iPhone or a simulator and run the app (Run).
+4. Start the existing receiver: `cd mobile/test-server && npm install && npm start`.
+5. On the phone enter the address the receiver printed, e.g.
+   `ws://192.168.1.20:8766/ws/controller`. The phone and the computer must be connected
+   over the network; `localhost` on the phone does not mean the computer. Allow the app
+   access to the local network. Leave the token empty for the test receiver.
+6. Choose a player → Next → Connect and open the pad.
 
-Przebieg: **serwer → wybór kontrolera → łączenie → pełnoekranowy pad**.
-Pad działa w pionie i poziomie. Sesja należy do `ControllerModel` utrzymywanego
-przez `@StateObject` w aplikacji; zmiana rozmiaru przebudowuje tylko układ pada.
-A/B/X mają ten sam rozmiar i jedną literę na przycisku. Krzyżak, START i SELECT
-wysyłają zdarzenia; przytrzymanie nie powtarza zdarzenia. Knob nie jest częścią
-obecnego kontraktu i nie jest prezentowany jako działająca opcja.
+Flow: **server → controller choice → connecting → full-screen pad**.
+The pad works in portrait and landscape. The session belongs to the `ControllerModel` held
+by `@StateObject` in the app; resizing only rebuilds the pad layout.
+A/B/X are the same size with one letter per button. The D-pad, START and SELECT
+send events; holding a button does not repeat the event. The knob is not part of
+the current contract and is not presented as a working option.
 
-## Sesja i dane
+## Session and data
 
-Transport to systemowy `URLSessionWebSocketTask`, kontrakt v1 opisany w
-[WEBSOCKET.md](../WEBSOCKET.md). Backend nie wymaga zmian dla iOS.
+The transport is the system `URLSessionWebSocketTask`, contract v1 described in
+[WEBSOCKET.md](../WEBSOCKET.md). The backend needs no changes for iOS.
 
-- `hello` zawiera `mode: manual`, gracza i UUID sesji. Pad jest dostępny dopiero
-  po zgodnym `ready` z serwera.
-- Każde naciśnięcie wysyła `manual`, `player`, `button`, `action: press`, `seq`
-  oraz `id: <session_id>:<seq>`. Numeracja zaczyna się od zera.
-- Brak ACK przez 2 s kończy sesję. Ping co 5 s podtrzymuje ją przy bezczynności.
-  Brak pong przez 10 s zrywa połączenie. Handshake ma limit 10 s.
-- Awaria transportu uruchamia ponowienie po 1/2/4/8/10 s, zawsze z nowym UUID.
-  Naciśnięcia podczas przerwy są niedostępne i nie są odtwarzane.
-- Błąd protokołu lub odmowa serwera pokazuje błąd i przycisk ponowienia.
-- Zmiana gracza zamyka poprzednią sesję i otwiera nową. Zakończenie, przejście
-  w tło i blokada telefonu zamykają połączenie. Obrót ekranu tego nie robi.
-- URL i gracz są zapamiętywani. Token pozostaje wyłącznie w pamięci aplikacji.
-- `ws://` jest dozwolone przez ATS dla lokalnego demo. `wss://` korzysta ze
-  standardowej walidacji certyfikatu. Projekt nie omija weryfikacji TLS.
+- `hello` contains `mode: manual`, the player and the session UUID. The pad becomes available only
+  after a matching `ready` from the server.
+- Every press sends `manual`, `player`, `button`, `action: press`, `seq`
+  and `id: <session_id>:<seq>`. Numbering starts at zero.
+- No ACK for 2 s ends the session. A ping every 5 s keeps it alive while idle.
+  No pong for 10 s drops the connection. The handshake has a 10 s limit.
+- A transport failure starts a retry after 1/2/4/8/10 s, always with a new UUID.
+  Presses during the break are unavailable and are not replayed.
+- A protocol error or a server refusal shows the error and a retry button.
+- Changing the player closes the previous session and opens a new one. Ending, going
+  to the background and locking the phone close the connection. Rotating the screen does not.
+- The URL and the player are remembered. The token stays only in the app's memory.
+- `ws://` is allowed by ATS for the local demo. `wss://` uses the
+  standard certificate validation. The project never bypasses TLS verification.
 
-## HALO: czego brakuje
+## HALO: what is missing
 
-Dostarczone w repozytorium AAR/JAR zawierają SDK dla Androida i nie można
-ich załadować w iOS. [Oferta producenta](https://www.brainaccess.ai/software/)
-opisuje mobilne SDK Kotlin dla Androida. Opis
-[desktopowego SDK](https://www.brainaccess.ai/software/brainaccess-sdk/)
-obejmuje też macOS, co nie oznacza biblioteki dla iOS.
+The AAR/JAR files shipped in the repository contain the SDK for Android and cannot
+be loaded on iOS. The [vendor's offer](https://www.brainaccess.ai/software/)
+describes a mobile Kotlin SDK for Android. The description of the
+[desktop SDK](https://www.brainaccess.ai/software/brainaccess-sdk/)
+also covers macOS, which does not mean a library for iOS.
 
-Publiczna dokumentacja klas `PacketCodec` i `GattUuids` nie dostarcza kompletnej
-specyfikacji komend konfiguracji oraz dekodowania skompresowanych pakietów EEG.
-Nie zaimplementowano zgadywanego dekodera ani pozornego strumienia danych.
-Do pełnego portu HALO potrzeba SDK skompilowanego dla iOS albo specyfikacji
-GATT, komend start/stop, konfiguracji kanałów i formatu pakietów wraz z danymi
-referencyjnymi. Sam CoreBluetooth umożliwia transport BLE, ale nie definiuje
-protokołu urządzenia. Ekran wyboru kontrolera jasno pokazuje brak tego trybu.
+The public documentation of the `PacketCodec` and `GattUuids` classes does not give a complete
+specification of the configuration commands and of decoding compressed EEG packets.
+No guessed decoder or fake data stream has been implemented.
+A full HALO port needs an SDK compiled for iOS, or a specification of the
+GATT, the start/stop commands, the channel configuration and the packet format together with reference
+data. CoreBluetooth alone provides the BLE transport but does not define
+the device protocol. The controller choice screen clearly shows that this mode is missing.
 
-## Sprawdzenie bez SDK iPhone'a
+## Checking without the iPhone SDK
 
-Pakiet SwiftPM używa tych samych plików transportu i interfejsu co projekt iOS.
-Ma podgląd dla macOS i samodzielne testy, które nie wymagają XCTest ani dodatkowych
-pakietów Swift:
+The SwiftPM package uses the same transport and UI files as the iOS project.
+It has a macOS preview and self-contained tests that need neither XCTest nor extra
+Swift packages:
 
 ```sh
 cd mobile/ios
 swift build
 swift run HaloProtocolChecks
 node scripts/smoke.mjs "$PWD/.build/debug/HaloSmoke"
-# Opcjonalny podgląd interfejsu macOS:
+# Optional macOS UI preview:
 swift run HaloDesktopPreview
 ```
 
-Test integracyjny wymaga zainstalowanych zależności `../test-server`
-(`cd ../test-server && npm install`). Uruchamia tymczasowe serwery na wolnych
-portach localhost; nie dotyka działającego odbiornika na porcie 8766.
+The integration test needs the `../test-server` dependencies installed
+(`cd ../test-server && npm install`). It starts temporary servers on free
+localhost ports; it does not touch a receiver running on port 8766.
 
-`HaloProtocolChecks` sprawdza kontrakt hello/manual, wszystkie 9 przycisków,
-identyfikatory zdarzeń, adresy, błędne koperty, gracza i odrzucenie przez serwer.
-`smoke.mjs` uruchamia skompilowanego klienta Swift z prawdziwym odbiornikiem Node:
-11 s bezczynności (heartbeat), 9 przycisków, zmianę sesji i gracza oraz zwolnienie
-slotów. Osobne serwery sprawdzają brak ACK, błędny tryb w ready, odmowę, błędny
-identyfikator sesji i brak ready.
+`HaloProtocolChecks` checks the hello/manual contract, all 9 buttons,
+event ids, addresses, malformed envelopes, the player and rejection by the server.
+`smoke.mjs` runs the compiled Swift client against the real Node receiver:
+11 s idle (heartbeat), 9 buttons, a session and player change, and releasing
+the slots. Separate servers check a missing ACK, a wrong mode in ready, a refusal, a wrong
+session id and a missing ready.
 
-Na komputerze przygotowującym port dostępne były tylko Command Line Tools,
-bez pełnego Xcode i SDK iOS. Kompilacja macOS i testy transportu nie zastępują
-builda ani testu na iPhonie. Przed użyciem na urządzeniu sprawdź obrót podczas
-sesji, zgodę na sieć lokalną, utratę Wi-Fi, zmianę gracza i przejście w tło.
+The computer that prepared the port had only the Command Line Tools,
+without full Xcode and the iOS SDK. The macOS build and the transport tests do not replace
+a build and a test on an iPhone. Before using it on a device, check rotation during
+a session, the local network permission, losing Wi-Fi, changing the player and going to the background.
 
-Po instalacji Xcode można też zbudować wersję symulatora z terminala:
+After installing Xcode you can also build the simulator version from the terminal:
 
 ```sh
 xcodebuild -project HaloController.xcodeproj -scheme HaloController \

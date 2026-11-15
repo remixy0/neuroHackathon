@@ -1,39 +1,39 @@
-# HALO Controller — kontrakt WebSocket v1
+# HALO Controller — WebSocket contract v1
 
-Propozycja kontraktu zaimplementowana w `controller/`. Istniejący backend musi
-obsługiwać poniższe wiadomości; nie zakładamy, że już obsługuje ten format.
-Odbiornik do testów obu trybów jest w `test-server/`. Protokół do gry pozostaje
-w `../game/WEBSOCKET.md`.
+Contract proposal implemented in `controller/`. The existing backend must
+support the messages below; we do not assume it already supports this format.
+A receiver for testing both modes is in `test-server/`. The game protocol stays
+in `../game/WEBSOCKET.md`.
 
 ```text
-HALO ──BLE── Android ──WebSocket /ws/controller── istniejący backend + model
+HALO ──BLE── Android ──WebSocket /ws/controller── existing backend + model
                                                       │
-                          gra ◀──WebSocket input──────┘
+                          game ◀──WebSocket input─────┘
 ```
 
-## Transport i kolejność
+## Transport and order
 
-- Zwykły WebSocket (RFC 6455), bez Socket.IO i bez subprotokołu.
-- Proponowana ścieżka `/ws/controller`; pełny URL jest edytowalny w aplikacji.
-- Jedna tekstowa wiadomość = jeden obiekt JSON UTF-8. Brak binarnych ramek w v1.
-- Telefon wysyła opcjonalny nagłówek `Authorization: Bearer <token>` przy upgrade.
-- `wss://` do połączeń szyfrowanych; `ws://` jest dostępne dla sieci lokalnej.
-- Każda wiadomość w obu kierunkach zawiera `type`, `version: 1`, `session_id` (UUID).
-- Jeden socket telefonu odpowiada jednemu graczowi, `1` lub `2`, i jednemu trybowi:
-  `eeg` (HALO) albo `manual` (przyciski na ekranie, bez opaski).
-- Sekwencja: otwarcie → `hello` → `ready` → `samples` lub `manual` / `ack` → `stop` / zamknięcie.
-- Backend ma 5 s na `ready`. Próbek nie wolno wysyłać przed `ready`.
-- Backend rezerwuje gracza atomowo. Drugi telefon żądający zajętego gracza otrzymuje
-  `error` i zamknięcie. Nie wolno bezwarunkowo nadpisywać przypisania istniejącego gracza.
-- Przy zamykaniu starego socketu backend zwalnia wyłącznie sesję będącą jego właścicielem,
-  aby opóźnione zamknięcie nie usunęło nowego przypisania po reconnect.
+- Plain WebSocket (RFC 6455), no Socket.IO and no subprotocol.
+- Proposed path `/ws/controller`; the full URL can be edited in the app.
+- One text message = one UTF-8 JSON object. No binary frames in v1.
+- The phone sends an optional `Authorization: Bearer <token>` header on upgrade.
+- `wss://` for encrypted connections; `ws://` is available on the local network.
+- Every message in both directions has `type`, `version: 1`, `session_id` (UUID).
+- One phone socket corresponds to one player, `1` or `2`, and one mode:
+  `eeg` (HALO) or `manual` (on-screen buttons, no headband).
+- Sequence: open → `hello` → `ready` → `samples` or `manual` / `ack` → `stop` / close.
+- The backend has 5 s to send `ready`. Samples must not be sent before `ready`.
+- The backend reserves the player atomically. A second phone asking for a busy player gets
+  `error` and a close. An existing player's assignment must never be overwritten unconditionally.
+- When the old socket closes, the backend releases only the session it owns,
+  so that a late close does not remove the new assignment after a reconnect.
 
-Rozszerzenie `manual` zachowuje `version: 1` i dotychczasowy format EEG. Brak
-`mode` w `hello` oznacza `eeg`; jawne `mode: "eeg"` również jest poprawne.
-Backend obsługujący tylko EEG powinien odrzucić żądanie `mode: "manual"`.
-Opis trybu ręcznego jest w sekcji 7 poniżej.
+The `manual` extension keeps `version: 1` and the existing EEG format. No
+`mode` in `hello` means `eeg`; an explicit `mode: "eeg"` is also valid.
+A backend that supports only EEG should reject a `mode: "manual"` request.
+Manual mode is described in section 7 below.
 
-## 1. Telefon → backend: hello (EEG)
+## 1. Phone → backend: hello (EEG)
 
 ```json
 {
@@ -61,31 +61,31 @@ Opis trybu ręcznego jest w sekcji 7 poniżej.
 }
 ```
 
-`device.id` to nieprzezroczysty identyfikator SDK, przydatny do logowania, nie do
-uwierzytelniania. Wartości `channels` pochodzą z rzeczywistego strumienia — backend
-mapuje kanały po nazwach, nie po zakładanej pozycji. Metadane są stałe w sesji.
-Aplikacja ustawia fabryczną konfigurację modelu: 250 Hz, wszystkie elektrody,
-wyłączony pomiar impedancji. Nie wykonuje filtracji ani normalizacji sygnału.
+`device.id` is an opaque SDK identifier, useful for logging, not for
+authentication. The `channels` values come from the actual stream — the backend
+maps channels by name, not by an assumed position. The metadata is fixed for the session.
+The app sets the model's factory configuration: 250 Hz, all electrodes,
+impedance measurement off. It does no filtering or normalisation of the signal.
 
-Backend weryfikuje wersję, gracza, częstotliwość, kanały i dostępność czujników
-potrzebnych modelowi. Model w `tools/neuro/pipeline.py` wymaga EEG O1/O2/Fp2/Fp1
-oraz wszystkich trzech osi akcelerometru i żyroskopu. HALO V1/V2 nie zapewnia tych
-czujników; backend powinien odrzucić taki strumień dla tego modelu, zamiast
-podstawiać zera. Można dopuścić go dopiero z modelem obsługującym brak IMU.
+The backend checks the version, player, sample rate, channels and the availability of
+the sensors the model needs. The model in `tools/neuro/pipeline.py` needs EEG O1/O2/Fp2/Fp1
+and all three axes of the accelerometer and gyroscope. HALO V1/V2 does not provide these
+sensors; the backend should reject such a stream for this model instead of
+substituting zeros. It can be allowed only with a model that handles a missing IMU.
 
-## 2. Backend → telefon: ready
+## 2. Backend → phone: ready
 
 ```json
 {"type":"ready","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","player":1}
 ```
 
-Wysyłane dokładnie raz, po zaakceptowaniu `hello` i przygotowaniu osobnego stanu
-modelu dla sesji. `session_id` i `player` muszą odpowiadać żądaniu.
+Sent exactly once, after accepting `hello` and preparing a separate model state
+for the session. `session_id` and `player` must match the request.
 
-## 3. Telefon → backend: samples
+## 3. Phone → backend: samples
 
-Jeden pakiet SDK jest jedną wiadomością. Nie czekamy na zapełnienie okna modelu.
-Przykład dwóch próbek na czterech kanałach:
+One SDK packet is one message. We do not wait for the model window to fill.
+Example with two samples on four channels:
 
 ```json
 {
@@ -108,137 +108,149 @@ Przykład dwóch próbek na czterech kanałach:
 }
 ```
 
-| Pole | Znaczenie |
+| Field | Meaning |
 | --- | --- |
-| `seq` | Liczba całkowita od 0, rośnie o 1 dla każdej wysłanej wiadomości `samples`. |
-| `sample_count` | Liczba wierszy N; dodatnia liczba całkowita. |
-| `first_sample_index` | Pierwszy numer próbki urządzenia, zapisany jako dziesiętny string. Początek sesji nie musi mieć indeksu 0. |
-| `wire_last_sample_index` | Oryginalny licznik pakietu BLE jako string; `"-1"`, jeśli brak. Zachowany do wykrywania nieciągłości / kolejności. |
-| `host_time_ns` | Monotoniczny zegar telefonu przy odebraniu pakietu BLE, jako string. Nie jest czasem Unix ani zegarem serwera. |
-| `eeg` | N × C skończonych liczb, płaska tablica: próbka 0 wszystkie kanały, próbka 1 wszystkie kanały, itd. Jednostka µV. |
-| `accel`, `gyro` | N × 3 liczb, kolejno x/y/z dla każdej próbki. `null` dla nieobecnego czujnika, zgodnie z `hello`. |
-| `is_dummy` | N wartości bool. `true` oznacza sztuczną próbkę wstawioną przez SDK w miejsce utraconej. |
-| `contact` | C wartości bool: `true` = kontakt; stan elektrod dla pakietu. |
-| `battery_pct` | Liczba 0–100, `null`, jeśli SDK nie podaje poprawnej wartości. |
-| `phone_discarded_samples` | String: liczba przeterminowanych próbek odrzuconych przez telefon w bieżącej sesji WebSocket. |
-| `ble_missed_samples` | String: narastający licznik brakujących próbek SDK w połączeniu BLE; może przetrwać reconnect WebSocket. |
+| `seq` | Integer from 0, grows by 1 for every `samples` message sent. |
+| `sample_count` | Number of rows N; a positive integer. |
+| `first_sample_index` | The device's first sample number, as a decimal string. The session does not have to start at index 0. |
+| `wire_last_sample_index` | The original BLE packet counter as a string; `"-1"` if missing. Kept for detecting gaps / order. |
+| `host_time_ns` | The phone's monotonic clock when the BLE packet was received, as a string. Not Unix time and not the server clock. |
+| `eeg` | N × C finite numbers, flat array: sample 0 all channels, sample 1 all channels, etc. Unit µV. |
+| `accel`, `gyro` | N × 3 numbers, x/y/z in turn for each sample. `null` for a missing sensor, as in `hello`. |
+| `is_dummy` | N bool values. `true` means an artificial sample the SDK inserted in place of a lost one. |
+| `contact` | C bool values: `true` = contact; electrode state for the packet. |
+| `battery_pct` | Number 0–100, `null` if the SDK gives no valid value. |
+| `phone_discarded_samples` | String: number of expired samples the phone discarded in the current WebSocket session. |
+| `ble_missed_samples` | String: cumulative counter of missing SDK samples on the BLE connection; may survive a WebSocket reconnect. |
 
-Liczby 64-bitowe zapisujemy jako stringi, aby zachować dokładność także w JavaScript.
-`seq` jest zwykłym numerem JSON, ograniczonym w kontrakcie do bezpiecznych liczb
-całkowitych JavaScript. Próbek nie należy sortować po czasie serwera.
-SDK powtarza pojedynczy odczyt IMU pakietu przy poszczególnych próbkach EEG;
-to nie oznacza niezależnego pomiaru IMU przy każdej próbce.
+64-bit numbers are written as strings to keep full precision in JavaScript too.
+`seq` is a plain JSON number, limited by the contract to JavaScript safe
+integers. Samples must not be sorted by server time.
+The SDK repeats the packet's single IMU reading for each EEG sample;
+this does not mean an independent IMU measurement for every sample.
 
-Backend powinien walidować długości, typy, skończoność liczb, `seq`, sesję oraz
-zgodność z `hello` **przed** przekazaniem danych do modelu. Praktyczny limit
-rozmiaru pojedynczej wiadomości: 1 MiB (SDK potrafi uzupełnić większą lukę BLE).
-Nie wolno rozpoznawać gestów z wierszy `is_dummy=true`. Nieciągłość numeracji,
-brak kontaktu lub luka powinny unieważnić okno detektora i uruchomić ponowne
-zbieranie poprawnego okna; nie sklejać fragmentów odległych w czasie.
+The backend should validate lengths, types, finiteness of numbers, `seq`, the session and
+consistency with `hello` **before** passing the data to the model. Practical size limit
+of a single message: 1 MiB (the SDK can fill a larger BLE gap).
+Gestures must not be recognised from rows with `is_dummy=true`. A gap in the numbering,
+lost contact or a gap in data should invalidate the detector window and start collecting
+a valid window again; do not stitch together pieces that are far apart in time.
 
-Przykład ułożenia poprawnego pakietu dla istniejącego rozpoznawania (po walidacji):
+Example of arranging a valid packet for the existing recognition (after validation):
 
 ```python
 eeg = np.asarray(packet["eeg"]).reshape(packet["sample_count"], len(channels))
 accel = np.asarray(packet["accel"]).reshape(packet["sample_count"], 3)
 gyro = np.asarray(packet["gyro"]).reshape(packet["sample_count"], 3)
 names = channels + ["Accel_x", "Accel_y", "Accel_z", "Gyro_x", "Gyro_y", "Gyro_z"]
-# Recognizer(names, sample_rate_hz) tworzymy raz na ciągły strumień, nie na pakiet.
-chunk = np.concatenate([eeg, accel, gyro], axis=1).T  # kanały × próbki
+# Create Recognizer(names, sample_rate_hz) once per continuous stream, not per packet.
+chunk = np.concatenate([eeg, accel, gyro], axis=1).T  # channels × samples
 results = recognizer.push(chunk)
 ```
 
-## 4. Backend → telefon: ack
+## 4. Backend → phone: ack
 
 ```json
 {"type":"ack","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","seq":12}
 ```
 
-Potwierdzenie narastające: wszystkie pakiety do `seq` włącznie zostały zwalidowane
-i przyjęte do ograniczonego bufora analizy. To nie jest potwierdzenie wykonania
-gestu ani ruchu w grze. Wysyłać co najwyżej co 250 ms przy napływających danych;
-można potwierdzać każdy pakiet. Nie wysyłać ACK dla nieprzyjętych danych.
-Powtórzony / starszy ACK jest ignorowany. ACK wykraczający poza wysłany zakres
-kończy sesję błędem. Telefon nie retransmituje próbek.
+Cumulative acknowledgement: all packets up to and including `seq` were validated
+and accepted into the bounded analysis buffer. It does not confirm that a
+gesture or a game move was executed. Send at most every 250 ms while data is flowing;
+acknowledging every packet is allowed. Do not send an ACK for data that was not accepted.
+A repeated / older ACK is ignored. An ACK beyond the range sent
+ends the session with an error. The phone does not retransmit samples.
 
-Jeśli najstarszy niepotwierdzony pakiet czeka ponad 2 s lub kolejka wyjściowa
-WebSocket przekroczy 64 KiB, telefon przerywa połączenie i otwiera nową sesję.
-Pojedynczy pakiet może przekroczyć próg kolejki; próg jest sprawdzany przed
-wysłaniem następnego. Próbki starsze niż 500 ms według zegara telefonu są
-odrzucane przed wysłaniem (np. podczas oczekiwania na `ready`).
-Backend również ogranicza kolejkę analizy i nie wykonuje zaległych gestów.
+The backend in `backend/` (since 15.11.2026) acknowledges the first packet at once, then cumulatively
+at most every 250 ms; the last packets before a pause are acknowledged by a background task. An ACK for every packet
+is a second 50 frames/s over Wi-Fi, and the phone's radio shares 2.4 GHz Wi-Fi with the headband's Bluetooth.
+The phone turns off Nagle's algorithm (`TCP_NODELAY`) so small packets do not wait in the socket.
 
-## 5. Backend → telefon: input (opcjonalny podgląd)
+If the oldest unacknowledged packet waits longer than 5 s or the WebSocket output queue
+exceeds 256 KiB (about 8 s of data), the phone drops the connection and opens
+a new session. A single packet may exceed the queue threshold; the threshold is checked before
+sending the next one. Samples older than 500 ms by the phone's clock are
+discarded before sending (e.g. while waiting for `ready`).
+The backend closes an EEG session after 6 s without samples, bounds the analysis queue and does not execute
+backlog gestures: after a network stall packets arrive in a batch, and the backend uses `host_time_ns`
+to compute how late a packet is compared with the session's fastest packet (lateness + time
+in the queue > 1 s = gesture skipped).
+
+The limits (15.11.2026, previously 2 s / 64 KiB / 3 s) are tuned for an iPhone hotspot,
+where the phone's data stops every now and then for 0.5–2.7 s; with the old limits every such
+pause ended the session (new session = warm-up and calibration from scratch).
+
+## 5. Backend → phone: input (optional preview)
 
 ```json
 {"type":"input","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","player":1,"direction":"left","id":"event-123","confidence":0.91}
 ```
 
-Telefon wyświetla kierunek `left`, `right`, `up` albo `down`. `id` i `confidence`
-są opcjonalne i obecnie ignorowane przez telefon. Komendy do gry backend wysyła
-**bezpośrednio** do jej socketu, w istniejącym formacie:
+The phone shows the direction `left`, `right`, `up` or `down`. `id` and `confidence`
+are optional and currently ignored by the phone. The backend sends game commands
+**directly** to the game's socket, in the existing format:
 
 ```json
 {"type":"input","player":1,"direction":"left","id":"event-123"}
 ```
 
-Telefon nie rozpoznaje gestów, nie steruje lokalnie grą i nie przekazuje komend
-z powrotem do backendu. Backend odpowiada za próg pewności, mapowanie gestów,
-powrót do spoczynku i wysłanie pojedynczego zdarzenia na gest.
+The phone does not recognise gestures, does not control the game locally and does not pass commands
+back to the backend. The backend is responsible for the confidence threshold, gesture mapping,
+return to rest and sending a single event per gesture.
 
-## 6. Zakończenie i błędy
+## 6. Ending and errors
 
-Telefon wysyła best-effort `stop`, następnie WebSocket close 1000:
+The phone sends a best-effort `stop`, then WebSocket close 1000:
 
 ```json
 {"type":"stop","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","reason":"user_or_lifecycle"}
 ```
 
-Backend może odrzucić sesję (również przed `ready`):
+The backend may reject the session (also before `ready`):
 
 ```json
-{"type":"error","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","code":"unsupported_stream","message":"Ten model wymaga akcelerometru i żyroskopu HALO V3."}
+{"type":"error","version":1,"session_id":"875b11bb-dfff-477b-9237-1baf62e0908f","code":"unsupported_stream","message":"This model needs the HALO V3 accelerometer and gyroscope."}
 ```
 
-Przykładowe kody: `unsupported_version`, `unsupported_stream`, `player_busy`,
-`invalid_packet`, `unauthorized`. Wszystkie wiadomości `error` są terminalne
-po stronie telefonu: pokazuje komunikat i wymaga ręcznego ponownego startu.
-Nieznany typ, binarna wiadomość, zła wersja/sesja lub błędny JSON również kończą
-transmisję. Dodatkowe pola znanych wiadomości są ignorowane. Backend wysyła do
-telefonu małe wiadomości (maks. 16 384 znaków).
+Example codes: `unsupported_version`, `unsupported_stream`, `player_busy`,
+`invalid_packet`, `unauthorized`. All `error` messages are terminal
+on the phone side: it shows the message and requires a manual restart.
+An unknown type, a binary message, a wrong version/session or invalid JSON also end
+the stream. Extra fields of known messages are ignored. The backend sends the
+phone small messages (max. 16,384 characters).
 
-Przy awarii sieci ponowienia następują po 1, 2, 4, 8, potem co 10 s. Każde
-ponowienie ma nowy UUID, nowe `hello`, nowe `seq=0` i (w trybie EEG) świeży strumień HALO.
-Pięć sekund wysłanych próbek resetuje opóźnienie ponawiania. Stan modelu i
-detektora gestów backendu nie przechodzi pomiędzy sesjami. Brak odtwarzania
-historii. Błędy 401/403/404 podczas upgrade i close 1002/1003/1008 są terminalne.
+On a network failure, retries happen after 1, 2, 4, 8 s, then every 10 s. Each
+retry has a new UUID, a new `hello`, a new `seq=0` and (in EEG mode) a fresh HALO stream.
+Five seconds of sent samples reset the retry delay. The backend's model and
+gesture detector state does not carry over between sessions. No history
+replay. HTTP 401/403/404 during upgrade and close 1002/1003/1008 are terminal.
 
-OkHttp wysyła standardowy WebSocket ping co 10 s; serwer odpowiada pong (zwykle
-robi to biblioteka WebSocket). Dodatkowo backend powinien wygaszać sesję po
-np. 3 s bez `samples` po fazie `ready` i zwalniać ją przy każdym disconnect.
-`stop` może nie dotrzeć po utracie sieci lub zamknięciu procesu. Telefon kończy
-sesję BLE, jeśli przez 8 s nie otrzyma pakietu, i wymaga ponownego wyboru HALO.
+OkHttp sends a standard WebSocket ping every 10 s; the server answers with pong (usually
+the WebSocket library does that). In addition the backend should expire the session after
+e.g. 3 s without `samples` after the `ready` phase and release it on every disconnect.
+`stop` may not arrive after a network loss or when the process is killed. The phone ends
+the BLE session if it receives no packet for 8 s, and requires choosing HALO again.
 
-## 7. Kontroler ręczny: manual
+## 7. Manual controller: manual
 
-Ten sam endpoint, uwierzytelnianie i rezerwacja gracza. Telefon nie łączy się
-z HALO, nie skanuje Bluetooth i nie przesyła danych czujników. Jeden gracz może
-używać HALO, a drugi pada. Jedna sesja nie miesza obu trybów.
+Same endpoint, authentication and player reservation. The phone does not connect
+to HALO, does not scan Bluetooth and does not send sensor data. One player may
+use HALO and the other the pad. One session does not mix both modes.
 
-Telefon wysyła:
+The phone sends:
 
 ```json
 {"type":"hello","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","role":"controller","mode":"manual","player":1}
 ```
 
-Nie ma pól `device` ani `stream`. Backend potwierdza **jawnie** tryb ręczny:
+There are no `device` or `stream` fields. The backend confirms manual mode **explicitly**:
 
 ```json
 {"type":"ready","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","mode":"manual","player":1}
 ```
 
-Brak `mode: "manual"` w odpowiedzi jest błędem, więc starszy backend nie włączy
-przez przypadek nieobsługiwanego pada. Po `ready` każde stuknięcie wysyła:
+A missing `mode: "manual"` in the reply is an error, so an older backend will not
+accidentally enable an unsupported pad. After `ready` every tap sends:
 
 ```json
 {
@@ -253,51 +265,51 @@ przez przypadek nieobsługiwanego pada. Po `ready` każde stuknięcie wysyła:
 }
 ```
 
-| Pole | Reguła |
+| Field | Rule |
 | --- | --- |
-| `player` | Liczba 1 lub 2, identyczna jak w zaakceptowanym `hello`. |
-| `button` | `up`, `down`, `left`, `right`, `a`, `b`, `x`, `select`, `start`. Małe litery. |
-| `action` | Zawsze `press`: pojedyncza aktywacja przycisku (stuknięcie). |
-| `seq` | Numer zdarzenia od 0, rośnie dokładnie o 1 w ramach sesji. |
-| `id` | Dokładnie `<session_id>:<seq>`, np. UUID z sufiksem `:0`. |
+| `player` | Number 1 or 2, the same as in the accepted `hello`. |
+| `button` | `up`, `down`, `left`, `right`, `a`, `b`, `x`, `select`, `start`. Lower case. |
+| `action` | Always `press`: a single button activation (tap). |
+| `seq` | Event number from 0, grows by exactly 1 within the session. |
+| `id` | Exactly `<session_id>:<seq>`, e.g. the UUID with the suffix `:0`. |
 
-Nie ma powtarzania po przytrzymaniu, stanów `down`/`up` przycisku ani zdarzenia
-puszczenia. Wartości `button: "up"` i `button: "down"` oznaczają kierunki krzyżaka.
-Przyciski SELECT/START są zwykłymi zdarzeniami do backendu; START nie otwiera
-sesji, a SELECT jej nie kończy. Ich znaczenie w grze ustala właściwy backend.
-Obecny odbiornik testowy wyłącznie wypisuje zdarzenia, nie mapuje ich na ruchy.
+There is no repeat on hold, no button `down`/`up` states and no release
+event. The values `button: "up"` and `button: "down"` mean D-pad directions.
+SELECT/START are ordinary events for the backend; START does not open
+a session and SELECT does not end it. Their meaning in the game is decided by the real backend.
+The current test receiver only prints the events; it does not map them to moves.
 
-Potwierdzenie korzysta z istniejącego `ack`:
+The acknowledgement uses the existing `ack`:
 
 ```json
 {"type":"ack","version":1,"session_id":"a34995a4-5a20-432a-b821-2d080fbeab91","seq":0}
 ```
 
-ACK potwierdza odbiór, nie wykonanie akcji w grze. Backend sprawdza kolejność,
-identyfikator, tryb, przycisk i gracza przed obsługą. Duplikat / pominięty numer
-jest odrzucany i nie może wykonać kolejnej akcji. Odbiornik testowy odpowiada
-`error` i zamyka niepoprawną sesję. Nie wolno przesłać `manual` w sesji `eeg`
-ani `samples` w sesji `manual`.
+The ACK confirms receipt, not that the action ran in the game. The backend checks the order,
+id, mode, button and player before handling it. A duplicate / skipped number
+is rejected and must not trigger another action. The test receiver answers
+`error` and closes the invalid session. `manual` must not be sent in an `eeg` session,
+nor `samples` in a `manual` session.
 
-Telefon czeka na ACK do 2 s, tak jak dla EEG. Przy problemie wraca na ekran
-łączenia i blokuje pad. Po odzyskaniu połączenia tworzy nowy UUID, `seq=0`
-i puste liczniki. Niewysłane / niepotwierdzone przyciski nie są odtwarzane.
-Zmiana zakładki gracza zamyka starą sesję i rejestruje nową; nie zmienia pola
-`player` wewnątrz już zaakceptowanej sesji. Zajęty gracz daje `player_busy`.
+The phone waits up to 2 s for the ACK, as for EEG. On a problem it goes back to the connecting
+screen and locks the pad. After the connection is back it creates a new UUID, `seq=0`
+and empty counters. Unsent / unacknowledged buttons are not replayed.
+Switching the player tab closes the old session and registers a new one; it does not change the
+`player` field inside an already accepted session. A busy player gives `player_busy`.
 
-**Bezczynność:** brak naciśnięć jest normalny. Telefon wysyła transportowy
-WebSocket ping co 5 s, a serwer odpowiada pong. Odbiornik testowy odświeża
-limit 10 s sesji manual po takim ping; po utracie transportu zwalnia gracza.
-Nie są to wiadomości JSON ani zdarzenia `manual`. Nie wymagaj ciągłych naciśnięć
-do utrzymania sesji. EEG nadal ma limit ciszy próbek niezależny od pingów.
+**Idle:** no presses is normal. The phone sends a transport
+WebSocket ping every 5 s and the server answers with pong. The test receiver refreshes
+the 10 s limit of a manual session on such a ping; after the transport is lost it releases the player.
+These are neither JSON messages nor `manual` events. Do not require continuous presses
+to keep the session alive. EEG still has its own sample-silence limit independent of pings.
 
-Opuszczenie aplikacji, zmiana trybu i zakończenie kontrolera wysyłają ten sam
-best-effort `stop` i zamykają połączenie. Tokeny oraz reguły błędów i ponawiania
-pozostają jak w sekcji 6.
+Leaving the app, changing the mode and ending the controller send the same
+best-effort `stop` and close the connection. Tokens and the error and retry rules
+stay as in section 6.
 
-## Źródło formatu SDK
+## Source of the SDK format
 
 [BrainAccess EegChunk 2.3.1](https://www.brainaccess.ai/documentation/kotlin-sdk/2.3.1/_static/dokka/core/com.neurotec.brainaccess.core/-eeg-chunk/index.html)
-opisuje kolejność sample-major, jednostki, zegar monotoniczny i znaczniki luk.
-[Instrukcja SDK](https://www.brainaccess.ai/documentation/kotlin-sdk/2.3.1/usage.html)
-opisuje konfigurację domyślną i różnice sprzętowe HALO.
+describes the sample-major order, units, monotonic clock and gap markers.
+The [SDK guide](https://www.brainaccess.ai/documentation/kotlin-sdk/2.3.1/usage.html)
+describes the default configuration and HALO hardware differences.

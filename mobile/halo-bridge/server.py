@@ -19,12 +19,12 @@ def encode(packet):
 
 def decode(raw, session=None):
     if not isinstance(raw, str) or len(raw) > 16_384:
-        raise ValueError("Oczekiwano małej wiadomości JSON.")
+        raise ValueError("Expected a small JSON message.")
     packet = json.loads(raw)
     if not isinstance(packet, dict) or type(packet.get("version")) is not int or packet["version"] != 1:
-        raise ValueError("Nieprawidłowa wersja protokołu.")
+        raise ValueError("Invalid protocol version.")
     if session is not None and packet.get("session_id") != session:
-        raise ValueError("Niezgodna sesja.")
+        raise ValueError("Session mismatch.")
     return packet
 
 
@@ -40,7 +40,7 @@ class Bridge:
         tasks = []
         try:
             if ws.request.path != "/ws/halo":
-                raise ValueError("Użyj ścieżki /ws/halo.")
+                raise ValueError("Use the /ws/halo path.")
             supplied = ws.request.headers.get("Authorization", "")
             if self.token and not secrets.compare_digest(supplied, "Bearer " + self.token):
                 await ws.close(1008, "Unauthorized")
@@ -49,24 +49,24 @@ class Bridge:
             session = str(uuid.UUID(request.get("session_id", "")))
             player = request.get("player")
             if request.get("type") != "bridge_open" or type(player) is not int or player not in (1, 2):
-                raise ValueError("Oczekiwano bridge_open z graczem 1 lub 2.")
+                raise ValueError("Expected bridge_open with player 1 or 2.")
             if self.source is not None and self.source.thread.is_alive():
-                raise ValueError("HALO jest zajęte przez inną sesję lub kończy rozłączanie.")
+                raise ValueError("HALO is busy with another session or still disconnecting.")
             source = self.source_factory(self.device, self.simulate)
             self.source = source
             deadline = time.monotonic() + 45
             while not source.ready.is_set():
                 if time.monotonic() > deadline or ws.close_code is not None:
-                    raise ValueError("Nie udało się połączyć z HALO w terminie.")
+                    raise ValueError("Could not connect to HALO in time.")
                 await asyncio.sleep(0.05)
             if source.error or not source.metadata:
-                raise ValueError(source.error or "Brak metadanych HALO.")
+                raise ValueError(source.error or "No HALO metadata.")
             def envelope(kind, **fields):
                 return dict(type=kind, version=1, session_id=session, **fields)
             await ws.send(encode(envelope("hello", role="controller", mode="eeg", player=player, **source.metadata)))
             ready = decode(await asyncio.wait_for(ws.recv(), 10), session)
             if ready.get("type") != "ready" or ready.get("player") != player:
-                raise ValueError("Backend nie potwierdził sesji EEG.")
+                raise ValueError("The backend did not confirm the EEG session.")
             source.start.set()
             pending, next_seq = {}, 0
             last_sample = time.monotonic()
@@ -74,19 +74,19 @@ class Bridge:
                 nonlocal next_seq, last_sample
                 while True:
                     if source.error or source.stop.is_set():
-                        raise ValueError(source.error or "HALO zakończyło transmisję.")
+                        raise ValueError(source.error or "HALO stopped streaming.")
                     now = time.monotonic()
                     if pending and now - min(pending.values()) > 2:
-                        raise ValueError("Brak ACK backendu przez 2 s.")
+                        raise ValueError("No backend ACK for 2 s.")
                     if now - last_sample > 8:
-                        raise ValueError("Brak próbek HALO przez 8 s.")
+                        raise ValueError("No HALO samples for 8 s.")
                     try:
                         packet = source.queue.get_nowait()
                     except queue.Empty:
                         await asyncio.sleep(0.01)
                         continue
                     if time.monotonic_ns() - int(packet["host_time_ns"]) > 500_000_000:
-                        raise ValueError("Próbki mostu są starsze niż 500 ms. Uruchom nową sesję.")
+                        raise ValueError("Bridge samples are older than 500 ms. Start a new session.")
                     last_sample = now
                     pending[next_seq] = now
                     outgoing = envelope("samples", seq=next_seq, **packet)
@@ -98,7 +98,7 @@ class Bridge:
                     if packet.get("type") == "stop":
                         return
                     if packet.get("type") != "ack" or type(packet.get("seq")) is not int or not -1 <= packet["seq"] < next_seq:
-                        raise ValueError("Nieprawidłowe potwierdzenie próbek.")
+                        raise ValueError("Invalid sample acknowledgement.")
                     for seq in list(pending):
                         if seq <= packet["seq"]:
                             del pending[seq]
@@ -132,10 +132,10 @@ async def main():
     parser.add_argument("--simulate", action="store_true", help="Explicit synthetic test source; never connects to HALO")
     args = parser.parse_args()
     if not args.simulate and not args.device:
-        parser.error("Podaj --device z nazwą opaski albo jawnie --simulate do testów.")
+        parser.error("Pass --device with the headband name, or --simulate explicitly for tests.")
     token = os.environ.get("HALO_BRIDGE_TOKEN", "")
     if args.host not in {"127.0.0.1", "localhost", "::1"} and not token:
-        parser.error("Dla dostępu z telefonu ustaw HALO_BRIDGE_TOKEN.")
+        parser.error("For access from a phone, set HALO_BRIDGE_TOKEN.")
     bridge = Bridge(args.device, token, args.simulate)
     async with serve(bridge.handle, args.host, args.port, max_size=16_384, max_queue=4,
                      write_limit=65_536, ping_interval=5, ping_timeout=10, close_timeout=2):

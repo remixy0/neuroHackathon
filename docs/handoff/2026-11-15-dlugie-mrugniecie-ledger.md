@@ -1,0 +1,23 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-11-15-dlugie-mrugniecie.md
+Spec: docs/superpowers/specs/2026-11-15-dlugie-mrugniecie-i-krotsza-kalibracja-design.md
+No commits (session rule). Pre-flight: T1->T2 LongBlink(push/reset/calibrate/snapshot, min_s) consistent; T1->T3 calibrate(windows)->min_s consistent.
+Task 0: complete (synced to gesty-arcade, stat identical; baseline 343 passed in 71.53s (0:01:11))
+Task 1: Ruling: auto polarity hysteresis (switch only when other side 1.5x stronger) — eye-opening edge is an opposite peak almost as large; closures flipped polarity and lost later closures (test_closures_do_not_flip_polarity RED->GREEN) — cost: genuinely re-seated band needs 1.5x evidence before auto flips (calibration fixes it anyway).
+Task 1: Ruling: DEFAULT_MIN_S 0.40 (spec/plan 0.45) — duration is measured above K_HOLD, ~0.09 s shorter than eyes-closed time; 0.40 measured ≈ 0.5 s closed (spec intent); normal blinks measure ~0.2 s — cost: slightly more long-ish natural blinks pass (checked in Task 4).
+Task 1: Ruling: test closure in test_calibrated_min_s_applies 0.42 s (plan had none specified) — must exceed calibrated 0.3 and stay under default 0.4 measured — cost: none.
+Task 1: complete (commits e6c03d8..e6c03d8, tests: /Users/stanislawsikora/Projects/NeuroHackathon/backend/.venv/bin/python -m pytest backend/tests/test_blinks.py -q -p no:cacheprovider → 14 passed in 1.45s)
+HANDOFF: zapisano docs/handoff/2026-11-15-dlugie-mrugniecie-HANDOFF.md (06:57), Task 2 w toku
+Task 2: Ruling: Task 2 and Task 3 done together — sessions._note_blink_window keys on step.gesture == "long_blink", so the old double_blink calibration steps would leave the detector uncalibrated in between; one consistent state is cheaper than a broken intermediate — cost: none (both tasks' tests run).
+Task 2: Ruling: LEGACY order {"double_blink", "blink"} — a file with both keeps the newer double_blink button (setdefault), long_blink entry wins over both — cost: none.
+Task 2: Ruling: model classes "blink" and "double_blink" always dropped in EegPipeline (MODEL_BLINKS) — long_blink only from Fp per spec — cost: a future model with a good blink class would need code change.
+Task 3: Ruling: model-threshold machinery for FACE kept (generic); its tests run with fixture model_face (FACE=double_blink/jaw/frown) since live FACE=("long_blink",) has no model class — cost: dead path in production until jaw/frown steps return.
+Task 3: Ruling: test_reconnect_soon_keeps_calibration / test_calibration_done_applies_thresholds_and_head_tilt now expect settings thresholds (no jaw/frown steps → no overrides), per spec "Szczęka i czoło bez kroków" — cost: none.
+Task 2: complete (no commits, session rule; tests: backend/tests tools/tests → 350 passed, final1.log)
+Task 3: complete (no commits; tests: backend/tests tools/tests → 350 passed, final1.log)
+Task 4: Ruling: plan's knobs (K_ON 0.4–0.8, RISE_S 0.1–0.3) alone could not reach < 1/min (defaults 1.62/min in game) — evaluation found two structural faults: SLOW_BAND 0.1 Hz sags the plateau ~40%/s and the filtered rest level sits below zero / wanders by ~1 blink amplitude in game, and a closure that never drops below K_HOLD blocked all later closures. Changed rule: SLOW_BAND (0.05, 10); onset = rise >= K_ON(0.7) x amp within RISE_S after QUIET_S 0.5 s with range < 0.8 x amp; hold relative to pre-rise level (K_HOLD 0.35) and >= DROP 0.5 x peak; MAX_CLOSURE_S 2 (spec: plateau > ~2 s = drift); K_LOW removed — cost: closures right after a blink (< 0.7 s) are missed; hit rate unproven (injected 0.6 s closures: ~50-60% blink sessions, ~20% game).
+Task 4: Ruling: spec target "< 1/min also in training sessions" not met (jaw 4.7, eyes/blink 3.3, keys 2.8, frown 1.4, head 0.6/min); game target met (0.94/min after head-motion mute) — sessions are full of deliberate face moves; reported to user, decided by the user's long-blink recording.
+Task 4: complete (tools/evaluate_long_blink.py → eval_final.txt; tests 350 passed)
+Task 5: Ruling: preview_start launched the main checkout's "halo-backend" config (port 8001) instead of the worktree test config; stopped within seconds, live server PID 77192 / settings.json / recordings untouched; test server then run via Bash on 127.0.0.1:8100 — cost: none observed.
+Task 5: Ruling: page showed raw model label "DOUBLE_BLINK" as top class; added Polish names for model classes blink/double_blink — cost: none.
+Task 5: complete (350 passed ×2; test server + sim_phone: calibration 10 steps / 24.5 s done, summary "długie mrugnięcie z czoła, kierunek +, wykryte 0/3, od 0,40 s", no console errors)
+Final review: self-review (no subagent tool use without the user's request)

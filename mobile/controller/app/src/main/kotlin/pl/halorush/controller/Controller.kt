@@ -3,7 +3,6 @@ package pl.halorush.controller
 import com.neurotec.brainaccess.core.DeviceSession
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
-import okhttp3.OkHttpClient
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -20,9 +19,7 @@ class Controller(
     private val stats: (StreamStats) -> Unit,
     private val input: (String) -> Unit,
 ) {
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS)
-        .pingInterval(10, TimeUnit.SECONDS).build()
+    private val http = BackendHttp.client(pingSeconds = 10)
 
     suspend fun run(session: DeviceSession, url: String, token: String, player: Int) {
         // Explicitly restore EEG, 250 Hz, all default channels; never inherit impedance mode.
@@ -32,7 +29,7 @@ class Controller(
             val backend = BackendSocket(http, UUID.randomUUID().toString(), player, input)
             var graceful = false
             try {
-                status(ConnectionUpdate(ConnectionPhase.SERVER, "Łączenie z serwerem…"))
+                status(ConnectionUpdate(ConnectionPhase.SERVER, "Connecting to the server…"))
                 backend.open(url, token)
                 coroutineScope {
                     var initialized = false
@@ -47,7 +44,7 @@ class Controller(
                             delay(250)
                             backend.checkHealth()
                             check(System.nanoTime() - lastReceived.get() < TimeUnit.SECONDS.toNanos(8)) {
-                                "HALO nie wysyła danych. Sprawdź Bluetooth i połącz opaskę ponownie."
+                                "HALO is not sending data. Check Bluetooth and connect the headband again."
                             }
                         }
                     }
@@ -62,17 +59,17 @@ class Controller(
                                 chunk.contact, chunk.batteryPct,
                             )
                             if (!initialized) {
-                                status(ConnectionUpdate(ConnectionPhase.REGISTERING, "Serwer potwierdza sesję gracza $player…"))
+                                status(ConnectionUpdate(ConnectionPhase.REGISTERING, "The server is confirming the session for player $player…"))
                                 backend.handshake(Protocol.hello(backend.sessionId, player, session.id.toString(),
                                     session.name, session.hardware.toString(), frame))
                                 layout = frame
                                 initialized = true
-                                status(ConnectionUpdate(ConnectionPhase.STREAMING, "Transmisja aktywna · gracz $player"))
+                                status(ConnectionUpdate(ConnectionPhase.STREAMING, "Streaming · player $player"))
                             }
                             val initial = checkNotNull(layout)
                             check(frame.channels == initial.channels && frame.sampleRate == initial.sampleRate &&
                                 (frame.accel != null) == (initial.accel != null) && (frame.gyro != null) == (initial.gyro != null)) {
-                                "Konfiguracja HALO zmieniła się w trakcie sesji"
+                                "HALO configuration changed during the session"
                             }
                             // SDK stamps arrival before decoding. Drop any backlog after handshake or a stall.
                             if (System.nanoTime() - frame.hostTimeNs > TimeUnit.MILLISECONDS.toNanos(500)) {
@@ -88,7 +85,7 @@ class Controller(
                                     frame.channels.zip(frame.contact.toList()), frame.sampleRate))
                             }
                         }
-                        error("HALO zakończyło transmisję. Połącz opaskę ponownie.")
+                        error("HALO stopped streaming. Connect the headband again.")
                     } finally {
                         failure.cancel(); watchdog.cancel()
                     }
@@ -97,17 +94,17 @@ class Controller(
                 throw e
             } catch (e: TimeoutCancellationException) {
                 currentCoroutineContext().ensureActive()
-                status(ConnectionUpdate(ConnectionPhase.RETRYING, "Serwer nie odpowiedział w terminie"))
+                status(ConnectionUpdate(ConnectionPhase.RETRYING, "The server did not respond in time"))
             } catch (e: CancellationException) {
                 graceful = true
                 throw e
             } catch (e: IOException) {
-                status(ConnectionUpdate(ConnectionPhase.RETRYING, e.message ?: "Utracono połączenie z serwerem"))
+                status(ConnectionUpdate(ConnectionPhase.RETRYING, e.message ?: "Lost connection to the server"))
             } finally {
                 backend.close(graceful)
             }
             val seconds = minOf(1L shl minOf(attempt++, 4), 10L)
-            status(ConnectionUpdate(ConnectionPhase.RETRYING, "Ponowne połączenie za ${seconds} s"))
+            status(ConnectionUpdate(ConnectionPhase.RETRYING, "Reconnecting in ${seconds} s"))
             delay(seconds * 1000)
         }
     }

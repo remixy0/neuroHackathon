@@ -10,7 +10,12 @@ Polecenia:  {"cmd":"scan"}  {"cmd":"connect","name":"BA HALO 208"}  {"cmd":"demo
             (znacznik systemu), ten sam zegar co czas przyjscia probek - session_recorder przelicza go na nr probki:
             {"cmd":"session_event","unix_time":...,"event":"key","label":"look_left","trial":7,"details":{"key":"A"}}
             {"cmd":"session_stop","unix_time":...,"status":"complete"}
-Zdarzenia:  ready, model, status, devices, battery, prediction, signal, gesture, position, session, sessions_state
+            ekran "Kalibracja glowy" (gestures/tilt.py TiltScreen; zapis training/calibration/tilt_<czepek>.json,
+            ten plik czyta serwer HALO -> Arcade dla tego samego czepka):
+            {"cmd":"tilt_start"}  {"cmd":"tilt_step","step":"neutral"|"head_left"|...|null}  {"cmd":"tilt_save"}
+            {"cmd":"tilt_stop"}
+Zdarzenia:  ready, model, status, devices, battery, prediction, signal, gesture, position, session, sessions_state,
+            tilt (stan ekranu kalibracji glowy ok. 10 razy na sekunde, tylko gdy otwarty), tilt_saved
 """
 from __future__ import annotations
 
@@ -28,6 +33,7 @@ import numpy as np
 import session_recorder
 from gestures import model as gm
 from gestures.live import LiveRecognizer
+from gestures.tilt import TiltScreen, load_calibration
 from neuro import appdata
 from neuro.model import FAMILY_PL, LABELS_PL, family
 from neuro.position import person_eye_calibration
@@ -305,6 +311,11 @@ def main():
     last_position = 0
     emo: dict | None = None  # trwajaca proba emocji: surowe kawalki od startu do konca wywolania
     session: SessionRecorder | None = None   # trwajaca sesja treningowa (zapis na dysk na biezaco)
+    # ekran "Kalibracja glowy": detektor glowy z akcelerometru liczy od polaczenia (srodek glowy gotowy od razu),
+    # stan wysyla tylko przy otwartym ekranie
+    tilt: TiltScreen | None = None
+    ix_acc: list[int] = []
+    ix_gyro: list[int] = []
 
     def sessions_state():
         try:
@@ -349,8 +360,22 @@ def main():
             emit("session", state="error", message=f"Nie udalo sie zapisac sesji: {ex}")
         sessions_state()
 
+    def tilt_save():
+        if tilt is None:
+            emit("tilt_saved", ok=False, message="Najpierw polacz czepek.")
+        elif isinstance(source, DemoSource) and not ALLOW_DEMO_TRAIN:
+            emit("tilt_saved", ok=False, message="Kalibracje zapisuje sie tylko z czepkiem, nie w trybie demo.")
+        else:
+            try:
+                path, result = tilt.save(source_name, cal_person or "osoba", SESSION_ROOT)
+                log(f"kalibracja glowy zapisana {path}")
+                emit("tilt_saved", ok=True, path=str(path), device=source_name, result=result)
+            except (OSError, ValueError) as ex:
+                emit("tilt_saved", ok=False, message=f"Nie zapisano: {ex}")
+
     def stop_source(msg: str = "Rozlaczono."):
-        nonlocal source, rec, sid, emo
+        nonlocal source, rec, sid, emo, tilt
+        tilt = None
         if session is not None:
             finish_session("interrupted")   # dane do chwili rozlaczenia zostaja (status w session.json)
         if emo is not None:
@@ -484,6 +509,19 @@ def main():
                                          daemon=True).start()
                     else:
                         emit("emo_saved", ok=False, message="Odrzucono probe.")
+            elif cmd == "tilt_start":
+                if tilt is None:
+                    emit("tilt_saved", ok=False, message="Najpierw polacz czepek z akcelerometrem.")
+                else:
+                    tilt.start()
+            elif cmd == "tilt_step":
+                if tilt is not None:
+                    tilt.set_step(c.get("step"))
+            elif cmd == "tilt_save":
+                tilt_save()
+            elif cmd == "tilt_stop":
+                if tilt is not None:
+                    tilt.stop()
 
         elif kind == "devices":
             scanning = False
@@ -507,6 +545,11 @@ def main():
                 stop_source(f"Blad modelu: {e}")
                 continue
             last_position = 0
+            acc_names = ("Accel_x", "Accel_y", "Accel_z")
+            ix_acc = [names.index(a) for a in acc_names] if all(a in names for a in acc_names) else []
+            gyro_names = ("Gyro_x", "Gyro_y", "Gyro_z")       # glowa z fuzji akcelerometru i zyroskopu
+            ix_gyro = [names.index(a) for a in gyro_names] if all(a in names for a in gyro_names) else []
+            tilt = TiltScreen(fs, saved=load_calibration(source_name, SESSION_ROOT)) if ix_acc else None
             if cal_person:
                 calibrate_eyes(cal_person)
             last_batt = 0.0
@@ -540,6 +583,15 @@ def main():
             while raw_ring and raw_ring[0][0] + raw_ring[0][1].shape[1] < keep_from:
                 raw_ring.pop(0)
             results = rec.push(arr)
+            if tilt is not None:
+                try:
+                    st = tilt.push(arr[ix_acc], arr[ix_gyro] if ix_gyro else None)
+                    if st is not None:
+                        emit("tilt", **st)
+                except Exception as ex:  # noqa: BLE001  ekran glowy nie moze zatrzymac rozpoznawania
+                    log(f"kalibracja glowy: {ex}")
+                    tilt = None
+                    emit("tilt_saved", ok=False, message=f"Blad odczytu glowy: {ex}")
             if rec.stream.n_seen - last_position >= int(POSITION_EVERY_S * fs_now):
                 last_position = rec.stream.n_seen
                 emit("position", t=round(rec.stream.n_seen / fs_now, 2), **rec.position.state)

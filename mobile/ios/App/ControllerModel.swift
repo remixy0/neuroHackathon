@@ -44,7 +44,7 @@ import UIKit
         UserDefaults.standard.set(player, forKey: "controller.player")
         let chosenPlayer = player, bearer = token
         problem = nil; connecting = true; screen = .connecting; sent = 0
-        status = "Łączenie z serwerem…"
+        status = "Connecting to the server…"
         keepAwake(true)
         runner = Task { [weak self] in
             await oldConnection?.close(graceful: true)
@@ -67,7 +67,7 @@ import UIKit
                     self.problem = error.localizedDescription
                     if let error = error as? ControllerError, !error.retryable {
                         self.connecting = false
-                        self.status = "Nie udało się uruchomić kontrolera"
+                        self.status = "Could not start the controller"
                         self.keepAwake(false)
                         return
                     }
@@ -75,9 +75,9 @@ import UIKit
                     let delay = delays[min(failures, delays.count - 1)]
                     failures += 1
                     self.connecting = true
-                    self.status = "Ponowne połączenie za \(delay) s…"
+                    self.status = "Reconnecting in \(delay) s…"
                     do { try await Task.sleep(nanoseconds: delay * 1_000_000_000) } catch { return }
-                    self.status = "Łączenie z serwerem…"
+                    self.status = "Connecting to the server…"
                 }
             }
         }
